@@ -1,0 +1,77 @@
+import { ArgumentsHost, HttpException, HttpStatus } from '@nestjs/common';
+import { describe, expect, it, vi } from 'vitest';
+import { AllExceptionsFilter } from './all-exceptions.filter';
+
+interface ErrorResponseBody {
+  statusCode: number;
+  error: string;
+  message: string | string[];
+  path: string;
+  timestamp: string;
+}
+
+function hostFor(path = '/api/test') {
+  const json = vi.fn<(body: ErrorResponseBody) => void>();
+  const status = vi.fn<(code: number) => { json: typeof json }>(() => ({ json }));
+  const host = {
+    switchToHttp: () => ({
+      getResponse: () => ({ status }),
+      getRequest: () => ({ url: path }),
+    }),
+  } as unknown as ArgumentsHost;
+  return { host, status, json };
+}
+
+describe('AllExceptionsFilter', () => {
+  it('maps a unique violation to 409 without leaking the constraint name', () => {
+    const { host, status, json } = hostFor('/api/auth/register');
+    const pgError = Object.assign(new Error('duplicate key'), {
+      code: '23505',
+      constraint: 'UQ_users_email',
+      detail: 'Key (email)=(a@b.c) already exists.',
+    });
+
+    new AllExceptionsFilter().catch(pgError, host);
+
+    expect(status).toHaveBeenCalledWith(HttpStatus.CONFLICT);
+    const body = json.mock.calls[0][0];
+    expect(body.message).toBe('Resource already exists');
+    expect(JSON.stringify(body)).not.toContain('UQ_users_email');
+    expect(JSON.stringify(body)).not.toContain('a@b.c');
+  });
+
+  it('maps a string-too-long error to 400', () => {
+    const { host, status } = hostFor();
+    const pgError = Object.assign(new Error('value too long'), { code: '22001' });
+
+    new AllExceptionsFilter().catch(pgError, host);
+
+    expect(status).toHaveBeenCalledWith(HttpStatus.BAD_REQUEST);
+  });
+
+  it('preserves an explicit HttpException status and message', () => {
+    const { host, status, json } = hostFor();
+    new AllExceptionsFilter().catch(new HttpException('Nope', HttpStatus.FORBIDDEN), host);
+
+    expect(status).toHaveBeenCalledWith(HttpStatus.FORBIDDEN);
+    expect(json.mock.calls[0][0].message).toBe('Nope');
+  });
+
+  it('never puts a stack trace in the response body', () => {
+    const { host, json } = hostFor();
+    new AllExceptionsFilter().catch(new Error('boom with secrets'), host);
+
+    const body = JSON.stringify(json.mock.calls[0][0]);
+    expect(body).not.toContain('boom with secrets');
+    expect(body).not.toContain('at ');
+  });
+
+  it('includes path and an ISO timestamp on every response', () => {
+    const { host, json } = hostFor('/api/users/me');
+    new AllExceptionsFilter().catch(new Error('x'), host);
+
+    const body = json.mock.calls[0][0];
+    expect(body.path).toBe('/api/users/me');
+    expect(() => new Date(body.timestamp).toISOString()).not.toThrow();
+  });
+});
