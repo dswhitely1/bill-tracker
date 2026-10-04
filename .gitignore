@@ -134,3 +134,6 @@ dist
 ### JetBrains
 .idea/
 *.iml
+
+### Claude Code worktrees
+.claude/worktrees/
