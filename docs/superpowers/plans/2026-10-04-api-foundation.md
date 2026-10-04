@@ -103,9 +103,11 @@ Expected: `$TMP/bill-tracker/` contains `nx.json`, `package.json`, `tsconfig.bas
 
 ```bash
 cd /Users/dswhitely1/Projects/bill-organization-tracker
-rsync -a --exclude='.git' --exclude='.gitignore' "$TMP/bill-tracker/" ./
+rsync -a --exclude='.git' --exclude='.gitignore' --exclude='node_modules' \
+  "$TMP/bill-tracker/" ./
 cat "$TMP/bill-tracker/.gitignore" >> .gitignore
 rm -rf "$TMP"
+npm install
 ```
 
 The existing `.gitignore` already carries the Node and JetBrains rules and must not be replaced. Nx's additions (`.nx/`, `dist`, `node_modules`) are appended.
@@ -487,7 +489,9 @@ import { validateEnv } from './env.schema';
       isGlobal: true,
       cache: true,
       validate: validateEnv,
-      envFilePath: ['.env'],
+      // ENV_FILE lets the e2e suite point the whole app at .env.test. Without it
+      // every e2e test would boot against the development database.
+      envFilePath: [process.env.ENV_FILE ?? '.env'],
     }),
   ],
 })
@@ -547,7 +551,7 @@ git commit -m "feat(api): scaffold NestJS app with validated typed config"
 ## Task 4: Database, entities, first migration, and the e2e harness
 
 **Files:**
-- Create: `apps/api/src/users/user.entity.ts`, `apps/api/src/auth/refresh-token.entity.ts`, `apps/api/src/categories/category.entity.ts`, `apps/api/src/database/data-source.ts`, `apps/api/src/database/database.module.ts`, `apps/api/src/database/migrations/1759536000000-InitialSchema.ts`, `apps/api/vitest.config.e2e.ts`, `apps/api/test/global-setup.ts`, `apps/api/test/db.ts`, `.env.test`
+- Create: `apps/api/src/users/user.entity.ts`, `apps/api/src/auth/refresh-token.entity.ts`, `apps/api/src/categories/category.entity.ts`, `apps/api/src/database/data-source.ts`, `apps/api/src/database/database.module.ts`, `apps/api/src/database/migrations/1759536000000-InitialSchema.ts`, `apps/api/vitest.config.e2e.ts`, `apps/api/test/global-setup.ts`, `apps/api/test/setup-env.ts`, `apps/api/test/db.ts`, `.env.test`
 - Modify: `package.json` (migration scripts), `apps/api/project.json` (test-e2e target), `apps/api/src/app/app.module.ts`
 - Test: `apps/api/test/schema.int-spec.ts`
 
@@ -839,6 +843,17 @@ export default async function globalSetup() {
 }
 ```
 
+Create `apps/api/test/setup-env.ts`:
+
+```ts
+import { config as loadEnv } from 'dotenv';
+
+// Runs inside every Vitest worker, before any application import.
+// globalSetup runs in a separate process, so its process.env never reaches here.
+process.env.ENV_FILE = '.env.test';
+loadEnv({ path: '.env.test', override: true });
+```
+
 Create `apps/api/test/db.ts`:
 
 ```ts
@@ -885,6 +900,7 @@ export default defineConfig({
     root: __dirname,
     include: ['test/**/*.int-spec.ts', 'test/**/*.e2e-spec.ts'],
     globalSetup: ['./test/global-setup.ts'],
+    setupFiles: ['./test/setup-env.ts'],
     hookTimeout: 30_000,
     testTimeout: 30_000,
     poolOptions: { threads: { singleThread: true } },
@@ -1028,7 +1044,7 @@ git commit -m "feat(api): add entities, initial migration, and e2e test harness"
 **Files:**
 - Create: `apps/api/src/common/filters/all-exceptions.filter.ts`, `apps/api/src/common/decorators/public.decorator.ts`, `apps/api/src/common/decorators/current-user.decorator.ts`, `apps/api/src/common/validators/max-bytes.validator.ts`, `apps/api/src/health/health.module.ts`, `apps/api/src/health/health.controller.ts`
 - Modify: `apps/api/src/main.ts`, `apps/api/src/app/app.module.ts`
-- Test: `apps/api/src/common/filters/all-exceptions.filter.spec.ts`, `apps/api/test/errors.int-spec.ts`
+- Test: `apps/api/src/common/filters/all-exceptions.filter.spec.ts`
 
 **Interfaces:**
 - Consumes: `Env` from Task 3.
