@@ -1,4 +1,4 @@
-import type { UserProfile } from './user.contracts';
+import type { UserProfile } from './user.contracts.js';
 
 export interface RegisterRequest {
   email: string;
