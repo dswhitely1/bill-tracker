@@ -1185,9 +1185,19 @@ git commit -m "feat(api): add entities, initial migration, and e2e test harness"
 Create `apps/api/src/common/filters/all-exceptions.filter.spec.ts`:
 
 ```ts
-import { ArgumentsHost, HttpException, HttpStatus } from '@nestjs/common';
-import { describe, expect, it, vi } from 'vitest';
+import { ArgumentsHost, HttpException, HttpStatus, Logger } from '@nestjs/common';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { AllExceptionsFilter } from './all-exceptions.filter';
+
+let logError: ReturnType<typeof vi.spyOn>;
+
+beforeEach(() => {
+  logError = vi.spyOn(Logger.prototype, 'error').mockImplementation(() => undefined);
+});
+
+afterEach(() => {
+  vi.restoreAllMocks();
+});
 
 function hostFor(path = '/api/test') {
   const json = vi.fn();
@@ -1236,13 +1246,19 @@ describe('AllExceptionsFilter', () => {
     expect(json.mock.calls[0][0].message).toBe('Nope');
   });
 
-  it('never puts a stack trace in the response body', () => {
+  it('never puts a stack trace in the response body, but does log it server-side', () => {
     const { host, json } = hostFor();
     new AllExceptionsFilter().catch(new Error('boom with secrets'), host);
 
     const body = JSON.stringify(json.mock.calls[0][0]);
     expect(body).not.toContain('boom with secrets');
     expect(body).not.toContain('at ');
+
+    // The detail has to go somewhere. Asserting it reached the logger closes the
+    // other half of the requirement, and the spy keeps test output pristine —
+    // without it the filter prints real stack traces to stderr on every run.
+    expect(logError).toHaveBeenCalledTimes(1);
+    expect(String(logError.mock.calls[0][1])).toContain('boom with secrets');
   });
 
   it('includes path and an ISO timestamp on every response', () => {
