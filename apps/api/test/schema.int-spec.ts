@@ -45,7 +45,7 @@ describe('initial schema', () => {
     await ds.query(`INSERT INTO categories (user_id, name) VALUES ($1, 'Utilities')`, [user.id]);
     await expect(
       ds.query(`INSERT INTO categories (user_id, name) VALUES ($1, 'UTILITIES')`, [user.id]),
-    ).rejects.toThrow();
+    ).rejects.toThrow(/duplicate key value violates unique constraint/i);
     await ds.query(`DELETE FROM users WHERE id = $1`, [user.id]);
   });
 
