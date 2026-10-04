@@ -6,7 +6,9 @@
 
 **Architecture:** A single Nx workspace holds `apps/api` (NestJS) and `libs/shared-types` (framework-free TypeScript contracts). Authentication splits into three services with separate concerns — `UsersService` owns persistence and hashing, `AuthService` owns credential verification, `TokenService` owns the token lifecycle. A globally registered guard protects every route unless explicitly marked `@Public()`. All schema change flows through TypeORM migrations; `synchronize` is never enabled.
 
-**Tech Stack:** Nx 23.2.1, NestJS 12.1.2, TypeORM 1.1.1, PostgreSQL 17, Node 24.14.1, Vitest 5.0.3, Zod 4.6.5, oxlint 1.86.0, Prettier.
+**Tech Stack:** Nx 23.2.0, NestJS 12.1.2, TypeORM 1.1.1, PostgreSQL 17, Node 24.14.1, Vitest 4.1.x, Zod 4.6.5, oxlint, Prettier.
+
+Nx and Vitest versions are whatever `create-nx-workspace@23.2.1` installs (nx 23.2.0, vitest 4.1.11) rather than the latest published releases. The spec names neither version; it requires Nx, Vitest, and oxlint as the tools. Do not fight the generator's pins — forcing an upgrade risks breaking the `@nx/vite` plugin's inference, which every test target depends on.
 
 **Spec:** `docs/superpowers/specs/2026-10-04-api-foundation-design.md`
 
@@ -66,7 +68,7 @@ These are the failure modes the spec implies but does not assign tests to. Each 
 | `apps/api/src/categories/categories.service.ts` | Ownership-scoped CRUD |
 | `apps/api/src/categories/categories.controller.ts` | `/api/categories` routes |
 | `apps/api/vitest.config.ts` | Unit tests, no database |
-| `apps/api/vitest.config.e2e.ts` | Integration and e2e, real database |
+| `apps/api/vitest.config.e2e.mts` | Integration and e2e, real database |
 | `apps/api/test/setup-e2e.ts` | Migrations once, truncate helper |
 
 ---
@@ -636,8 +638,8 @@ git commit -m "feat(api): scaffold NestJS app with validated typed config"
 ## Task 4: Database, entities, first migration, and the e2e harness
 
 **Files:**
-- Create: `apps/api/src/users/user.entity.ts`, `apps/api/src/auth/refresh-token.entity.ts`, `apps/api/src/categories/category.entity.ts`, `apps/api/src/database/data-source.ts`, `apps/api/src/database/database.module.ts`, `apps/api/src/database/migrations/1759536000000-InitialSchema.ts`, `apps/api/vitest.config.e2e.ts`, `apps/api/test/global-setup.ts`, `apps/api/test/setup-env.ts`, `apps/api/test/db.ts`, `.env.test`
-- Modify: `package.json` (migration scripts), `apps/api/project.json` (test-e2e target), `apps/api/src/app/app.module.ts`
+- Create: `apps/api/src/users/user.entity.ts`, `apps/api/src/auth/refresh-token.entity.ts`, `apps/api/src/categories/category.entity.ts`, `apps/api/src/database/data-source.ts`, `apps/api/src/database/database.module.ts`, `apps/api/src/database/migrations/1759536000000-InitialSchema.ts`, `apps/api/vitest.config.e2e.mts`, `apps/api/test/global-setup.ts`, `apps/api/test/setup-env.ts`, `apps/api/test/db.ts`, `.env.test`
+- Modify: `package.json` (migration scripts), `apps/api/package.json` (test-e2e target), `apps/api/src/app/app.module.ts`
 - Test: `apps/api/test/schema.int-spec.ts`
 
 **Interfaces:**
@@ -962,7 +964,7 @@ export async function truncateAll(dataSource: DataSource): Promise<void> {
 }
 ```
 
-Create `apps/api/vitest.config.e2e.ts`:
+Create `apps/api/vitest.config.e2e.mts`:
 
 ```ts
 import { defineConfig } from 'vitest/config';
@@ -982,7 +984,7 @@ export default defineConfig({
   test: {
     globals: true,
     environment: 'node',
-    root: __dirname,
+    root: import.meta.dirname,
     include: ['test/**/*.int-spec.ts', 'test/**/*.e2e-spec.ts'],
     globalSetup: ['./test/global-setup.ts'],
     setupFiles: ['./test/setup-env.ts'],
@@ -995,14 +997,29 @@ export default defineConfig({
 
 `singleThread` is required: these tests share one database and truncate between cases, so parallel files would delete each other's rows.
 
-Add a `test-e2e` target to `apps/api/project.json`:
+Register the `test-e2e` target. This workspace is package.json-based — there
+is no `apps/api/project.json`, and Nx infers targets from config files (the
+existing `test` target is an inferred `nx:run-commands` running `vitest` with
+`cwd: apps/api`). Add the extra target under an `nx` key in
+`apps/api/package.json`, matching that style:
 
 ```json
-"test-e2e": {
-  "executor": "@nx/vite:test",
-  "options": { "configFile": "apps/api/vitest.config.e2e.ts" }
+"nx": {
+  "targets": {
+    "test-e2e": {
+      "executor": "nx:run-commands",
+      "options": {
+        "cwd": "apps/api",
+        "command": "vitest run --config vitest.config.e2e.mts"
+      }
+    }
+  }
 }
 ```
+
+Verify with `npx nx show project api --json` that `test-e2e` appears in the
+target list alongside the inferred ones. Do not create a `project.json` — it
+would change how Nx derives the project's identity.
 
 - [ ] **Step 8: Write the failing schema test**
 
