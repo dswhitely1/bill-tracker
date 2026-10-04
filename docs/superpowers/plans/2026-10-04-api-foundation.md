@@ -1021,6 +1021,12 @@ Verify with `npx nx show project api --json` that `test-e2e` appears in the
 target list alongside the inferred ones. Do not create a `project.json` — it
 would change how Nx derives the project's identity.
 
+**Assertion style note.** oxlint's `vitest(require-to-throw-message)` rule
+rejects a bare `toThrow()`. Every rejection assertion in this plan therefore
+names the error it expects. That is not just lint appeasement: a bare
+`toThrow()` passes when the statement fails for *any* reason — a typo'd column
+name would satisfy it just as well as the constraint under test.
+
 - [ ] **Step 8: Write the failing schema test**
 
 Create `apps/api/test/schema.int-spec.ts`:
@@ -1073,7 +1079,7 @@ describe('initial schema', () => {
     await ds.query(`INSERT INTO categories (user_id, name) VALUES ($1, 'Utilities')`, [user.id]);
     await expect(
       ds.query(`INSERT INTO categories (user_id, name) VALUES ($1, 'UTILITIES')`, [user.id]),
-    ).rejects.toThrow();
+    ).rejects.toThrow(/duplicate key value violates unique constraint/i);
     await ds.query(`DELETE FROM users WHERE id = $1`, [user.id]);
   });
 
@@ -1817,7 +1823,7 @@ describe('TokenService.rotate', () => {
 
   it('rejects an unknown token without touching the user’s other sessions', async () => {
     await tokens.issueRefreshToken(userId);
-    await expect(tokens.rotate('not-a-real-token')).rejects.toThrow();
+    await expect(tokens.rotate('not-a-real-token')).rejects.toThrow(/Invalid refresh token/i);
     const live = await ds.query(`SELECT 1 FROM refresh_tokens WHERE revoked_at IS NULL`);
     expect(live).toHaveLength(1);
   });
@@ -1825,7 +1831,7 @@ describe('TokenService.rotate', () => {
   it('rejects an expired token', async () => {
     const { token } = await tokens.issueRefreshToken(userId);
     await ds.query(`UPDATE refresh_tokens SET expires_at = now() - interval '1 day'`);
-    await expect(tokens.rotate(token)).rejects.toThrow();
+    await expect(tokens.rotate(token)).rejects.toThrow(/expired/i);
   });
 
   // --- Review Focus item 1 ---
@@ -1862,7 +1868,7 @@ describe('TokenService.rotate', () => {
     const second = await tokens.rotate(first.token);
     await tokens.revokeAllForUser(userId);
 
-    await expect(tokens.rotate(first.token)).rejects.toThrow();
+    await expect(tokens.rotate(first.token)).rejects.toThrow(/reuse detected/i);
     expect(second.refreshToken).toBeTruthy();
   });
 
