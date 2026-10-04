@@ -74,19 +74,24 @@ These are the failure modes the spec implies but does not assign tests to. Each 
 ## Task 1: Nx workspace bootstrap
 
 **Files:**
-- Create: `nx.json`, `package.json`, `tsconfig.base.json`, `.prettierrc`, `.npmrc`
+- Create: `nx.json`, `package.json`, `tsconfig.base.json`, `tsconfig.json`, `.prettierrc`, `.prettierignore`
 - Modify: `.gitignore`
 
 **Interfaces:**
 - Consumes: nothing.
-- Produces: a working `npx nx` CLI at the repository root, with `apps/` and `libs/` directories.
+- Produces: a working `npx nx` CLI at the repository root, with npm workspaces resolving `apps/*` and `libs/*`.
 
-`create-nx-workspace` always creates its own subdirectory, so it is run in a temporary location and its contents are moved into this existing repository.
+`create-nx-workspace` always creates its own subdirectory, so it is run in a
+temporary location and its contents are moved into this existing repository.
+
+**Never hardcode the repository path.** This plan may be executed from a git
+worktree. Every step below derives the root with
+`REPO=$(git rev-parse --show-toplevel)`.
 
 - [ ] **Step 1: Generate the workspace in a temporary directory**
 
 ```bash
-cd /Users/dswhitely1/Projects/bill-organization-tracker
+REPO=$(git rev-parse --show-toplevel)
 TMP=$(mktemp -d)
 cd "$TMP"
 npx --yes create-nx-workspace@23.2.1 bill-tracker \
@@ -94,33 +99,78 @@ npx --yes create-nx-workspace@23.2.1 bill-tracker \
   --packageManager=npm \
   --nxCloud=skip \
   --skipGit \
+  --aiAgents none \
   --interactive=false
 ```
 
-Expected: `$TMP/bill-tracker/` contains `nx.json`, `package.json`, `tsconfig.base.json`.
+`--aiAgents none` is required. Without it the generator writes `CLAUDE.md`,
+`AGENTS.md`, `.cursor/`, `.codex/`, `.gemini/`, `.opencode/`, and
+`.github/skills/` into the repository root. `CLAUDE.md` and `AGENTS.md` are
+agent instruction files — committing ones nobody wrote silently changes how
+every future session behaves in this repo.
+
+Expected: `$TMP/bill-tracker/` contains `nx.json`, `package.json`,
+`tsconfig.base.json`, and no `CLAUDE.md` or `AGENTS.md`.
 
 - [ ] **Step 2: Move it into the repository, preserving the existing `.gitignore`**
 
 ```bash
-cd /Users/dswhitely1/Projects/bill-organization-tracker
+cd "$REPO"
 rsync -a --exclude='.git' --exclude='.gitignore' --exclude='node_modules' \
   "$TMP/bill-tracker/" ./
 cat "$TMP/bill-tracker/.gitignore" >> .gitignore
 rm -rf "$TMP"
-npm install
 ```
 
-The existing `.gitignore` already carries the Node and JetBrains rules and must not be replaced. Nx's additions (`.nx/`, `dist`, `node_modules`) are appended.
+The existing `.gitignore` already carries the Node, JetBrains, and worktree
+rules and must not be replaced. Nx's additions (`.nx/`, `dist`,
+`node_modules`) are appended.
 
-- [ ] **Step 3: Verify the CLI works and reports the expected version**
+- [ ] **Step 3: Point npm workspaces at `apps/` and `libs/`**
+
+The `apps` preset scaffolds a package-based workspace globbing `packages/*`.
+The spec's layout is `apps/api`, `apps/web`, and `libs/shared-types`, so the
+glob has to match or npm will not link the library that Task 2 creates.
+
+Edit `package.json`: set `"name": "bill-tracker"` and replace the
+`workspaces` array with:
+
+```json
+"workspaces": ["apps/*", "libs/*"]
+```
+
+Then remove the unused scaffold directory and create the real ones:
 
 ```bash
+rmdir packages 2>/dev/null || true
+mkdir -p apps libs
+```
+
+If `rmdir` fails because `packages/` is not empty, stop and report what is
+inside it — the preset is not behaving as this plan assumes.
+
+- [ ] **Step 4: Install and verify the CLI**
+
+```bash
+npm install
 npx nx report
 ```
 
-Expected: output includes `nx : 23.2.1`. If it reports a different version, stop — the rest of the plan's generator flags assume 23.2.1.
+Expected: `nx` reports a version of `23.2.0` or higher in the 23.2.x line.
 
-- [ ] **Step 4: Pin the Node engine floor**
+`create-nx-workspace@23.2.1` pins nx `23.2.0` through its workspace template;
+that is expected, not an error. What actually matters is that the generator
+options later tasks pass still exist. Confirm it:
+
+```bash
+npx nx g @nx/js:library --help
+```
+
+Expected: the help output lists `--linter` (accepting `oxlint`),
+`--unitTestRunner` (accepting `vitest`), `--bundler`, and `--importPath`. If
+any is missing, stop and report — later tasks depend on all four.
+
+- [ ] **Step 5: Pin the Node engine floor**
 
 Add to `package.json`:
 
@@ -128,14 +178,26 @@ Add to `package.json`:
 "engines": { "node": ">=24.11.0" }
 ```
 
-TypeORM 1.1.1 declares `^20.19.0 || ^22.13.0 || >=24.11.0`. Recording the floor here makes a mismatched Node version a clear install-time error rather than a confusing runtime one.
+TypeORM 1.1.1 declares `^20.19.0 || ^22.13.0 || >=24.11.0`. Recording the
+floor here makes a mismatched Node version a clear install-time error rather
+than a confusing runtime one.
 
-- [ ] **Step 5: Commit**
+- [ ] **Step 6: Confirm nothing unwanted is staged, then commit**
+
+```bash
+git status --short
+```
+
+Expected: no `CLAUDE.md`, `AGENTS.md`, `.cursor/`, `.codex/`, `.gemini/`,
+`.opencode/`, `opencode.json`, or `README.md`. Task 11 writes the README; a
+generated one would be overwritten and must not be committed here.
 
 ```bash
 git add -A
 git commit -m "chore: bootstrap Nx 23 workspace"
 ```
+
+Verify `node_modules` was not staged: `git show --stat HEAD | head -20`.
 
 ---
 
