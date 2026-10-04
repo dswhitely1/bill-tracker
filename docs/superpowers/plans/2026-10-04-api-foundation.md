@@ -250,7 +250,7 @@ Create `libs/shared-types/src/lib/enums.spec.ts`:
 
 ```ts
 import { describe, expect, it } from 'vitest';
-import { BILL_FREQUENCIES, BILL_STATUSES } from './enums';
+import { BILL_FREQUENCIES, BILL_STATUSES } from './enums.js';
 
 describe('bill enums', () => {
   it('exposes exactly the four frequencies the schema CHECK allows', () => {
@@ -271,7 +271,7 @@ These values are duplicated into a database `CHECK` constraint in Task 4. The te
 npx nx test shared-types
 ```
 
-Expected: FAIL — `Cannot find module './enums'`.
+Expected: FAIL — `Cannot find module './enums.js'`.
 
 - [ ] **Step 4: Write the implementation**
 
@@ -288,7 +288,7 @@ export type BillStatus = (typeof BILL_STATUSES)[number];
 Create `libs/shared-types/src/lib/auth.contracts.ts`:
 
 ```ts
-import type { UserProfile } from './user.contracts';
+import type { UserProfile } from './user.contracts.js';
 
 export interface RegisterRequest {
   email: string;
@@ -356,11 +356,17 @@ export interface UpdateCategoryRequest {
 
 Replace `libs/shared-types/src/index.ts`:
 
+The `.js` extensions on these relative specifiers are required, not optional.
+`tsconfig.base.json` sets `moduleResolution: "nodenext"`, under which TypeScript
+rejects extensionless relative imports with TS2835. Vitest resolves them anyway,
+so the tests pass while `tsc` fails — the error only appears when something
+typechecks or builds the library.
+
 ```ts
-export * from './lib/enums';
-export * from './lib/auth.contracts';
-export * from './lib/user.contracts';
-export * from './lib/category.contracts';
+export * from './lib/enums.js';
+export * from './lib/auth.contracts.js';
+export * from './lib/user.contracts.js';
+export * from './lib/category.contracts.js';
 ```
 
 - [ ] **Step 5: Run the test to verify it passes**
