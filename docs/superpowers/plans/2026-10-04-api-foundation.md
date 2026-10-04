@@ -16,7 +16,14 @@ Nx and Vitest versions are whatever `create-nx-workspace@23.2.1` installs (nx 23
 
 - `synchronize: false` in every environment, including development. All schema change flows through migration files.
 - No secret has a fallback default. `JWT_ACCESS_SECRET` must be at least 32 characters; the application refuses to boot without it.
-- Services inject the typed config object. `process.env` is never read outside `apps/api/src/config/`.
+- Services inject the typed config object. Application code never reads
+  `process.env` directly. Two bootstrap locations are sanctioned exceptions,
+  because both run before any Nest container exists and have nothing to inject
+  from: `apps/api/src/database/data-source.ts` (loaded by the TypeORM CLI) and
+  `apps/api/test/**` (the Vitest harness, which must resolve a connection and
+  create the test database before the app is constructed). Routing those through
+  `validateEnv` would still read `process.env` — it would add indirection, not
+  isolation. The rule's purpose is that *services* never bypass typed config.
 - Access tokens are JWTs, 15-minute lifetime, held in memory by clients. Refresh tokens are opaque 32-byte random values, stored only as SHA-256 hashes, 30-day lifetime, delivered in an httpOnly cookie.
 - Every query in a service filters by the authenticated `user_id`. A path parameter is never accepted as proof of ownership.
 - Money is `numeric(12,2)`. `due_date` is `date`. Enums are `varchar` plus a `CHECK` constraint.
@@ -657,8 +664,14 @@ Property-to-column mapping that later tasks depend on:
 - [ ] **Step 1: Install the migration CLI dependency**
 
 ```bash
-npm install -D dotenv
+npm install -D dotenv@18.0.5
 ```
+
+Pin it. Unpinned, this resolved to dotenv 18, whose `config()` prints an
+`injected env (N) from ...` banner on every call — which then appears in every
+migration run and every e2e run. Pass `{ quiet: true }` at **every**
+`loadEnv(...)` call site in this plan (`data-source.ts`, `global-setup.ts`,
+`setup-env.ts`) to keep CLI and test output pristine.
 
 - [ ] **Step 2: Write the entities**
 
@@ -780,7 +793,7 @@ import 'reflect-metadata';
 import { DataSource } from 'typeorm';
 import { config as loadEnv } from 'dotenv';
 
-loadEnv({ path: process.env.ENV_FILE ?? '.env' });
+loadEnv({ path: process.env.ENV_FILE ?? '.env', quiet: true });
 
 export const AppDataSource = new DataSource({
   type: 'postgres',
@@ -906,9 +919,16 @@ import { DataSource } from 'typeorm';
 import { config as loadEnv } from 'dotenv';
 
 export default async function globalSetup() {
-  loadEnv({ path: '.env.test', override: true });
+  loadEnv({ path: '.env.test', override: true, quiet: true });
 
-  const url = new URL(process.env.DATABASE_URL as string);
+  const rawUrl = process.env.DATABASE_URL;
+  if (!rawUrl) {
+    throw new Error(
+      'DATABASE_URL is not set. Expected apps/api/.env.test to define it — ' +
+        'without it the e2e suite has no database to create.',
+    );
+  }
+  const url = new URL(rawUrl);
   const testDbName = url.pathname.slice(1);
 
   const adminUrl = new URL(url.toString());
@@ -938,7 +958,7 @@ import { config as loadEnv } from 'dotenv';
 // Runs inside every Vitest worker, before any application import.
 // globalSetup runs in a separate process, so its process.env never reaches here.
 process.env.ENV_FILE = '.env.test';
-loadEnv({ path: '.env.test', override: true });
+loadEnv({ path: '.env.test', override: true, quiet: true });
 ```
 
 Create `apps/api/test/db.ts`:
