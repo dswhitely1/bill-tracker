@@ -3,9 +3,16 @@ import { DataSource } from 'typeorm';
 import { config as loadEnv } from 'dotenv';
 
 export default async function globalSetup() {
-  loadEnv({ path: '.env.test', override: true });
+  loadEnv({ path: '.env.test', override: true, quiet: true });
 
-  const url = new URL(process.env.DATABASE_URL as string);
+  const rawUrl = process.env.DATABASE_URL;
+  if (!rawUrl) {
+    throw new Error(
+      'DATABASE_URL is not set. Expected apps/api/.env.test to define it — ' +
+        'without it the e2e suite has no database to create.',
+    );
+  }
+  const url = new URL(rawUrl);
   const testDbName = url.pathname.slice(1);
 
   const adminUrl = new URL(url.toString());

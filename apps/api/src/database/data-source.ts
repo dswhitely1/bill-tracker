@@ -6,7 +6,7 @@ import { RefreshToken } from '../auth/refresh-token.entity';
 import { Category } from '../categories/category.entity';
 import { InitialSchema1759536000000 } from './migrations/1759536000000-InitialSchema';
 
-loadEnv({ path: process.env.ENV_FILE ?? '.env' });
+loadEnv({ path: process.env.ENV_FILE ?? '.env', quiet: true });
 
 // Entities and migrations are listed explicitly rather than glob-matched.
 // TypeORM's glob loader (ImportUtils.importOrRequireFile) falls back to a
