@@ -164,9 +164,11 @@ fixed channels; anything more general is speculation.
 | `token_hash` | `varchar(64)` UNIQUE | SHA-256 of an opaque 32-byte token |
 | `expires_at` | `timestamptz` | |
 | `revoked_at` | `timestamptz` NULL | |
+| `replaced_by` | `uuid` NULL FK → `refresh_tokens` | set on rotation |
 | `created_at` | `timestamptz` | |
 
-Index on `user_id`.
+Index on `user_id`. `replaced_by` links a rotated token to its successor
+and exists to resolve the concurrent-refresh race described in §7.
 
 The refresh token is opaque and stored hashed, not as a JWT. A revocable
 JWT requires a blocklist table, which is this table with extra
@@ -296,6 +298,32 @@ returns 401.
 
 This rule is what makes rotation a containment mechanism rather than a
 formality, and it is the design's primary security property.
+
+### The concurrent-refresh race
+
+Strict reuse detection breaks a legitimate case. When two API calls are
+in flight and both receive 401, the client issues two refresh requests
+carrying the same cookie. The first rotates successfully; the second
+presents a token revoked microseconds earlier and, under the rule above,
+logs the user out of a working session. This is ordinary behavior for a
+single-page application, not an attack.
+
+Resolution: a rotated token remains redeemable for a **30-second grace
+window**, during which it returns its existing successor rather than
+minting another. Concretely, when a revoked token is presented:
+
+1. If `replaced_by` is set, the successor is still active, and
+   `revoked_at` is within 30 seconds, return the successor's access
+   token and re-send the successor cookie. This is a benign double
+   request.
+2. Otherwise — no successor, successor already revoked, or outside the
+   window — treat it as replay and revoke the user's entire chain.
+
+The window is deliberately short. A stolen token is valuable for days;
+confining the ambiguity to 30 seconds preserves the security property
+while eliminating the false positive. Clients should still single-flight
+their refresh calls; this makes correctness independent of whether they
+do.
 
 ### Cookie attributes
 
@@ -468,6 +496,10 @@ concentrate:
 - a valid refresh rotates the token and marks the previous hash revoked
 - replaying a revoked refresh token revokes the user's entire token chain
 - an expired refresh token returns 401
+- two concurrent refreshes with the same cookie both succeed, and the
+  user is not logged out
+- a revoked token presented outside the 30-second grace window revokes
+  the chain
 - a controller without `@Public()` rejects an anonymous request, proving
   the global guard fails closed
 - changing a password invalidates every previously issued refresh token
