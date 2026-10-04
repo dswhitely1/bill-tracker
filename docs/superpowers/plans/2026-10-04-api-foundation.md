@@ -103,11 +103,19 @@ npx --yes create-nx-workspace@23.2.1 bill-tracker \
   --interactive=false
 ```
 
-`--aiAgents none` is required. Without it the generator writes `CLAUDE.md`,
-`AGENTS.md`, `.cursor/`, `.codex/`, `.gemini/`, `.opencode/`, and
-`.github/skills/` into the repository root. `CLAUDE.md` and `AGENTS.md` are
-agent instruction files — committing ones nobody wrote silently changes how
-every future session behaves in this repo.
+`--aiAgents none` asks the generator not to write `CLAUDE.md`, `AGENTS.md`,
+`.cursor/`, `.codex/`, `.gemini/`, `.opencode/`, and `.github/skills/` into
+the repository root. `CLAUDE.md` and `AGENTS.md` are agent instruction files
+— committing ones nobody wrote silently changes how every future session
+behaves in this repo.
+
+**The flag is not sufficient on its own.** When the `CLAUDECODE` environment
+variable is set — as it is in any Claude Code shell — the generator activates
+"AI Agent Mode" and writes those files regardless of the flag. Do not try to
+defeat this by unsetting `CLAUDECODE`: that path produces a different and
+incompatible scaffold (no `tsconfig.base.json`, no `packages/`). Pass the flag
+anyway for environments where it works, and rely on the Step 2 rsync excludes
+to keep the files out of the repository.
 
 Expected: `$TMP/bill-tracker/` contains `nx.json`, `package.json`,
 `tsconfig.base.json`, and no `CLAUDE.md` or `AGENTS.md`.
@@ -116,7 +124,13 @@ Expected: `$TMP/bill-tracker/` contains `nx.json`, `package.json`,
 
 ```bash
 cd "$REPO"
-rsync -a --exclude='.git' --exclude='.gitignore' --exclude='node_modules' \
+rsync -a \
+  --exclude='.git' --exclude='.gitignore' --exclude='node_modules' \
+  --exclude='CLAUDE.md' --exclude='AGENTS.md' --exclude='README.md' \
+  --exclude='opencode.json' \
+  --exclude='.claude/' --exclude='.agents/' --exclude='.cursor/' \
+  --exclude='.codex/' --exclude='.gemini/' --exclude='.opencode/' \
+  --exclude='.vscode/' --exclude='.github/' \
   "$TMP/bill-tracker/" ./
 cat "$TMP/bill-tracker/.gitignore" >> .gitignore
 rm -rf "$TMP"
@@ -142,12 +156,15 @@ Edit `package.json`: set `"name": "bill-tracker"` and replace the
 Then remove the unused scaffold directory and create the real ones:
 
 ```bash
+rm -f packages/.gitkeep
 rmdir packages 2>/dev/null || true
 mkdir -p apps libs
 ```
 
-If `rmdir` fails because `packages/` is not empty, stop and report what is
-inside it — the preset is not behaving as this plan assumes.
+The `.gitkeep` removal is required: the preset leaves a placeholder inside
+`packages/`, so a bare `rmdir` silently no-ops and the stale directory
+survives. If `rmdir` still fails, stop and report what is inside `packages/`
+— the preset is not behaving as this plan assumes.
 
 - [ ] **Step 4: Install and verify the CLI**
 
