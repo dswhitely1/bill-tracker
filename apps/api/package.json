@@ -38,6 +38,13 @@
         ],
         "executor": "nx:noop"
       },
+      "test-e2e": {
+        "executor": "nx:run-commands",
+        "options": {
+          "cwd": "apps/api",
+          "command": "vitest run --config vitest.config.e2e.mts"
+        }
+      },
       "serve": {
         "continuous": true,
         "executor": "@nx/js:node",

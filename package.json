@@ -2,7 +2,12 @@
   "name": "bill-tracker",
   "version": "0.0.0",
   "license": "MIT",
-  "scripts": {},
+  "scripts": {
+    "typeorm": "typeorm-ts-node-commonjs -d apps/api/src/database/data-source.ts",
+    "migration:run": "npm run typeorm -- migration:run",
+    "migration:revert": "npm run typeorm -- migration:revert",
+    "migration:show": "npm run typeorm -- migration:show"
+  },
   "private": true,
   "engines": {
     "node": ">=24.11.0"
@@ -26,6 +31,7 @@
     "@types/passport-jwt": "^4.0.1",
     "@types/supertest": "^7.2.1",
     "@vitest/coverage-v8": "~4.1.0",
+    "dotenv": "^18.0.5",
     "nx": "23.2.0",
     "oxlint": "^1.75.0",
     "prettier": "^3.8.1",

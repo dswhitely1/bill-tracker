@@ -10,5 +10,9 @@
       "path": "./apps/api"
     }
   ],
-  "compilerOptions": {}
+  "compilerOptions": {
+    "rootDir": ".",
+    "experimentalDecorators": true,
+    "emitDecoratorMetadata": true
+  }
 }
