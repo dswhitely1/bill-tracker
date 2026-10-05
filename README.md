@@ -77,6 +77,22 @@ Unit and e2e tests use separate environment files (`.env` is not read
 by tests): the e2e suite points at a dedicated `bills_test` database via
 `apps/api/.env.test` and creates/migrates it automatically on first run.
 
+### Dependency audit triage
+
+`npm audit` reports high-severity advisories (as of 2026-10-04: 22
+vulnerabilities, 20 high / 2 moderate). Every one is a dev-only Nx
+toolchain transitive (webpack-dev-server's chokidar/http-proxy-middleware
+chain, smol-toml, sockjs's uuid), most with no fix available short of a
+breaking Nx major bump:
+
+```bash
+npm audit --omit=dev   # 0 vulnerabilities
+```
+
+Nothing in the production dependency graph is affected. Re-run the
+`--omit=dev` command above rather than re-litigating the full report —
+it's the one that reflects what actually ships.
+
 ## API surface
 
 All routes sit under a global `/api` prefix. There is no URL
