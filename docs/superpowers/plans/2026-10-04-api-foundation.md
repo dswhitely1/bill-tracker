@@ -1172,7 +1172,7 @@ git commit -m "feat(api): add entities, initial migration, and e2e test harness"
 **Files:**
 - Create: `apps/api/src/common/filters/all-exceptions.filter.ts`, `apps/api/src/common/decorators/public.decorator.ts`, `apps/api/src/common/decorators/current-user.decorator.ts`, `apps/api/src/common/validators/max-bytes.validator.ts`, `apps/api/src/health/health.module.ts`, `apps/api/src/health/health.controller.ts`
 - Modify: `apps/api/src/main.ts`, `apps/api/src/app/app.module.ts`
-- Test: `apps/api/src/common/filters/all-exceptions.filter.spec.ts`
+- Test: `apps/api/src/common/filters/all-exceptions.filter.spec.ts`, `apps/api/src/common/validators/max-bytes.validator.spec.ts`
 
 **Interfaces:**
 - Consumes: `Env` from Task 3.
@@ -1232,6 +1232,15 @@ describe('AllExceptionsFilter', () => {
   it('maps a string-too-long error to 400', () => {
     const { host, status } = hostFor();
     const pgError = Object.assign(new Error('value too long'), { code: '22001' });
+
+    new AllExceptionsFilter().catch(pgError, host);
+
+    expect(status).toHaveBeenCalledWith(HttpStatus.BAD_REQUEST);
+  });
+
+  it('maps a not-null violation to 400', () => {
+    const { host, status } = hostFor();
+    const pgError = Object.assign(new Error('null value in column'), { code: '23502' });
 
     new AllExceptionsFilter().catch(pgError, host);
 
@@ -1393,6 +1402,58 @@ export function MaxBytes(limit: number, options?: ValidationOptions) {
   };
 }
 ```
+
+- [ ] **Step 4b: Test the byte validator**
+
+`MaxBytes` exists because bcrypt silently truncates past 72 bytes, so the
+byte-versus-character distinction IS the validator — a version using
+`String.length` would pass every test that only used ASCII while leaving the
+truncation bug wide open. Test it directly rather than relying on the HTTP-level
+coverage a later task provides.
+
+Create `apps/api/src/common/validators/max-bytes.validator.spec.ts`:
+
+```ts
+import { validate } from 'class-validator';
+import { describe, expect, it } from 'vitest';
+import { MaxBytes } from './max-bytes.validator';
+
+class Subject {
+  @MaxBytes(72)
+  value!: string;
+}
+
+const check = async (value: unknown) => {
+  const subject = new Subject();
+  (subject as { value: unknown }).value = value;
+  return validate(subject);
+};
+
+describe('MaxBytes', () => {
+  it('accepts a 72-byte ASCII string', async () => {
+    expect(await check('a'.repeat(72))).toHaveLength(0);
+  });
+
+  it('rejects a 73-byte ASCII string', async () => {
+    expect(await check('a'.repeat(73))).not.toHaveLength(0);
+  });
+
+  it('rejects a string legal in characters but illegal in bytes', async () => {
+    // 72 three-byte characters = 216 bytes. String.length would allow this.
+    const multibyte = '\u4e2d'.repeat(72);
+    expect(multibyte).toHaveLength(72);
+    expect(Buffer.byteLength(multibyte, 'utf8')).toBe(216);
+    expect(await check(multibyte)).not.toHaveLength(0);
+  });
+
+  it('rejects a non-string value rather than throwing', async () => {
+    expect(await check(12345)).not.toHaveLength(0);
+  });
+});
+```
+
+The third case is the one that matters: it fails against a `String.length`
+implementation and passes against a `Buffer.byteLength` one.
 
 - [ ] **Step 5: Write the health module**
 
