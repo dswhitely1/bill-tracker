@@ -60,4 +60,51 @@ export class BillGeneratorService {
     }
     return total;
   }
+
+  /**
+   * An instance is **rewritable** when it is in the future, untouched by
+   * payment, and not individually customized. Template changes rewrite
+   * those and nothing else — spec §5.4.
+   *
+   * `due_date > today` is strict, not `>=`: an occurrence that is already
+   * due was billed at the old amount, and that is a historical fact. The
+   * escape hatch for a genuine typo is PATCH on the instance itself.
+   */
+  async rewriteForBill(bill: Bill, manager: EntityManager): Promise<void> {
+    const t = this.today();
+    const target = bill.isActive
+      ? occurrenceDates(
+          { frequency: bill.frequency, startDate: bill.startDate, endDate: bill.endDate },
+          t,
+        )
+      : [];
+
+    const REWRITABLE = `"due_date" > $2
+        AND "status" = 'UNPAID'
+        AND "amount_paid" = 0
+        AND "is_customized" = false`;
+
+    // 1. Drop rewritable instances whose date is no longer an occurrence.
+    //    With an empty target (a deactivated bill) `= ANY('{}')` is false,
+    //    so NOT(...) is true and every rewritable future row goes.
+    await manager.query(
+      `DELETE FROM "bill_instances"
+        WHERE "bill_id" = $1 AND ${REWRITABLE}
+          AND NOT ("due_date" = ANY($3::date[]))`,
+      [bill.id, t, target],
+    );
+
+    // 2. Repoint the amount on rewritable instances that remain, preserving
+    //    their ids so a client holding one does not get a 404.
+    await manager.query(
+      `UPDATE "bill_instances" SET "amount" = $4, "updated_at" = now()
+        WHERE "bill_id" = $1 AND ${REWRITABLE}
+          AND "due_date" = ANY($3::date[])`,
+      [bill.id, t, target, bill.defaultAmount],
+    );
+
+    // 3. Insert whatever the target set still lacks. ON CONFLICT DO NOTHING
+    //    means a date already held by a paid or customized row stays as is.
+    await this.materializeForBill(bill, manager);
+  }
 }

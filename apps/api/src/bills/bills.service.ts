@@ -7,6 +7,7 @@ import { Category } from '../categories/category.entity';
 import { BillGeneratorService } from './bill-generator.service';
 import { toBillResponse } from './mappers';
 import { CreateBillDto } from './dto/create-bill.dto';
+import { UpdateBillDto } from './dto/update-bill.dto';
 import { compare } from './dates';
 
 export interface BillValidationFields {
@@ -67,6 +68,41 @@ export class BillsService {
       );
       await this.generator.materializeForBill(bill, manager);
       return toBillResponse(bill);
+    });
+  }
+
+  async update(userId: string, id: string, dto: UpdateBillDto): Promise<BillResponse> {
+    const existing = await this.loadOwned(userId, id);
+
+    const merged = {
+      ...existing,
+      ...(dto.name !== undefined && { name: dto.name }),
+      ...(dto.defaultAmount !== undefined && { defaultAmount: dto.defaultAmount }),
+      ...(dto.frequency !== undefined && { frequency: dto.frequency }),
+      ...(dto.startDate !== undefined && { startDate: dto.startDate }),
+      ...(dto.endDate !== undefined && { endDate: dto.endDate ?? null }),
+      ...(dto.categoryId !== undefined && { categoryId: dto.categoryId ?? null }),
+      ...(dto.isActive !== undefined && { isActive: dto.isActive }),
+    } as Bill;
+
+    // Runs against the request-scoped repositories, BEFORE the transaction
+    // below opens — same discipline as create().
+    await this.validate(userId, {
+      amount: merged.defaultAmount,
+      startDate: merged.startDate,
+      endDate: merged.endDate,
+      categoryId: merged.categoryId,
+    });
+
+    // One transaction: the template row and its instance set move together,
+    // so no reader ever sees a new amount against the old occurrence set.
+    // Every query inside uses `manager`, never `this.bills` — drawing a
+    // second connection from the pool while this one holds a transaction is
+    // how a previous sub-project self-deadlocked.
+    return this.bills.manager.transaction(async (manager) => {
+      const saved = await manager.getRepository(Bill).save(merged);
+      await this.generator.rewriteForBill(saved, manager);
+      return toBillResponse(saved);
     });
   }
 

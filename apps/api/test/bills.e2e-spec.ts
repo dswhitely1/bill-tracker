@@ -235,3 +235,43 @@ describe('DELETE /api/bills/:id', () => {
       .set('Authorization', `Bearer ${theirs}`).expect(200);
   });
 });
+
+describe('PATCH /api/bills/:id', () => {
+  it('updates the template and reports the new values', async () => {
+    const { token } = await registerAs('a@example.com');
+    const bill = await request(app.getHttpServer()).post('/api/bills')
+      .set('Authorization', `Bearer ${token}`).send(makeBill()).expect(201);
+
+    const res = await request(app.getHttpServer())
+      .patch(`/api/bills/${bill.body.id}`).set('Authorization', `Bearer ${token}`)
+      .send({ defaultAmount: 1950, name: 'Rent (raised)' }).expect(200);
+
+    expect(res.body).toMatchObject({ name: 'Rent (raised)', defaultAmount: 1950 });
+    expect(typeof res.body.defaultAmount).toBe('number');
+  });
+
+  it("returns 404 for another user's bill", async () => {
+    const { token: mine } = await registerAs('a@example.com');
+    const { token: theirs } = await registerAs('b@example.com');
+    const theirBill = await request(app.getHttpServer()).post('/api/bills')
+      .set('Authorization', `Bearer ${theirs}`).send(makeBill()).expect(201);
+
+    await request(app.getHttpServer())
+      .patch(`/api/bills/${theirBill.body.id}`).set('Authorization', `Bearer ${mine}`)
+      .send({ defaultAmount: 1 }).expect(404);
+
+    const unchanged = await request(app.getHttpServer())
+      .get(`/api/bills/${theirBill.body.id}`)
+      .set('Authorization', `Bearer ${theirs}`).expect(200);
+    expect(unchanged.body.defaultAmount).toBe(1800);
+  });
+
+  it('rejects an endDate earlier than the existing startDate', async () => {
+    const { token } = await registerAs('a@example.com');
+    const bill = await request(app.getHttpServer()).post('/api/bills')
+      .set('Authorization', `Bearer ${token}`).send(makeBill()).expect(201);
+    await request(app.getHttpServer())
+      .patch(`/api/bills/${bill.body.id}`).set('Authorization', `Bearer ${token}`)
+      .send({ endDate: '2025-01-01' }).expect(400);
+  });
+});
