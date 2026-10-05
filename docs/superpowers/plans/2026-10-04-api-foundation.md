@@ -903,13 +903,20 @@ PORT=3001
 DATABASE_URL=postgres://don:super@localhost:5432/bills_test
 DB_SSL=false
 JWT_ACCESS_SECRET=test-secret-at-least-thirty-two-chars-long
-JWT_ACCESS_TTL=1s
+JWT_ACCESS_TTL=15m
 REFRESH_TTL_DAYS=30
 BCRYPT_COST=10
 WEB_ORIGIN=http://localhost:4200
 ```
 
-`JWT_ACCESS_TTL=1s` lets the e2e journey reach a genuinely expired token without waiting or mocking the clock. `BCRYPT_COST=10` keeps the suite fast while staying a real bcrypt hash.
+`BCRYPT_COST=10` keeps the suite fast while staying a real bcrypt hash.
+
+**`JWT_ACCESS_TTL` stays at a normal 15m here, and the journey spec overrides it
+for itself.** A global 1-second TTL makes every multi-step authenticated test
+racy: any test that registers a user and then uses that token across more than a
+second of work — two registrations with bcrypt plus category seeding is enough —
+gets a spurious 401. The result is an intermittent failure that reads as a flaky
+test and is actually a configuration decision.
 
 Create `apps/api/test/global-setup.ts`:
 
@@ -2128,8 +2135,10 @@ describe('TokenService.rotate', () => {
 
     expect(decoded.sub).toBe(userId);
     expect(decoded.email).toBe('tok@test.dev');
-    // .env.test sets JWT_ACCESS_TTL=1s
-    expect(decoded.exp - decoded.iat).toBe(1);
+    // .env.test sets JWT_ACCESS_TTL=15m. Asserting the derived number rather
+    // than restating the string still catches a dropped expiresIn, which would
+    // leave exp undefined and make this NaN.
+    expect(decoded.exp - decoded.iat).toBe(900);
   });
 
   it('revokes the whole chain when a token is replayed after the grace window', async () => {
@@ -3544,6 +3553,28 @@ git commit -m "feat(api): add ownership-scoped categories CRUD"
 - Consumes: everything built in Tasks 1 through 10.
 - Produces: no new source interfaces.
 
+**The journey spec sets its own TTL.** It needs a genuinely expired access
+token; every other spec needs tokens that survive the test. Scope the short TTL
+to this file, before the app is constructed, and restore it afterwards. Files
+run sequentially (`fileParallelism: false`), so nothing else observes it:
+
+```ts
+let previousTtl: string | undefined;
+
+beforeAll(async () => {
+  previousTtl = process.env.JWT_ACCESS_TTL;
+  process.env.JWT_ACCESS_TTL = '1s'; // must be set BEFORE the app is created
+  process.env.ENV_FILE = '.env.test';
+  // ...then build the testing module exactly as the other specs do
+});
+
+afterAll(async () => {
+  if (previousTtl === undefined) delete process.env.JWT_ACCESS_TTL;
+  else process.env.JWT_ACCESS_TTL = previousTtl;
+  // ...then close the app and destroy the data source
+});
+```
+
 - [ ] **Step 1: Write the journey test**
 
 Create `apps/api/test/journey.e2e-spec.ts` with the same bootstrap as the other spec files, then:
@@ -3572,7 +3603,8 @@ describe('full token lifecycle', () => {
     await request(server).get('/api/users/me')
       .set('Authorization', `Bearer ${firstAccess}`).expect(200);
 
-    // 3. JWT_ACCESS_TTL is 1s in .env.test, so this is a real expiry, not a mock.
+    // 3. This spec set JWT_ACCESS_TTL=1s for itself in beforeAll, so this is a
+    //    real expiry rather than a mocked clock — and no other spec is affected.
     await sleep(1500);
     await request(server).get('/api/users/me')
       .set('Authorization', `Bearer ${firstAccess}`).expect(401);
