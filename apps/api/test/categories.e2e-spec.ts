@@ -166,3 +166,58 @@ describe('categories', () => {
     expect(rows).toHaveLength(0);
   });
 });
+
+describe('DELETE /api/categories/:id with bills attached', () => {
+  const makeBill = (categoryId: string) => ({
+    name: 'Rent', defaultAmount: 1800, frequency: 'MONTHLY',
+    startDate: '2026-01-01', categoryId,
+  });
+
+  it('409s and names how many bills reference it', async () => {
+    const { token } = await registerAs('a@example.com');
+    const cats = await request(app.getHttpServer())
+      .get('/api/categories').set('Authorization', `Bearer ${token}`).expect(200);
+    const categoryId = cats.body[0].id as string;
+
+    await request(app.getHttpServer()).post('/api/bills')
+      .set('Authorization', `Bearer ${token}`).send(makeBill(categoryId)).expect(201);
+
+    const res = await request(app.getHttpServer())
+      .delete(`/api/categories/${categoryId}`)
+      .set('Authorization', `Bearer ${token}`).expect(409);
+    expect(JSON.stringify(res.body)).toContain('1');
+
+    // Still there.
+    const after = await request(app.getHttpServer())
+      .get('/api/categories').set('Authorization', `Bearer ${token}`).expect(200);
+    expect(after.body.map((c: { id: string }) => c.id)).toContain(categoryId);
+  });
+
+  it('deletes once the last bill referencing it is gone', async () => {
+    const { token } = await registerAs('a@example.com');
+    const cats = await request(app.getHttpServer())
+      .get('/api/categories').set('Authorization', `Bearer ${token}`).expect(200);
+    const categoryId = cats.body[0].id as string;
+    const bill = await request(app.getHttpServer()).post('/api/bills')
+      .set('Authorization', `Bearer ${token}`).send(makeBill(categoryId)).expect(201);
+
+    await request(app.getHttpServer())
+      .delete(`/api/bills/${bill.body.id}`)
+      .set('Authorization', `Bearer ${token}`).expect(204);
+    await request(app.getHttpServer())
+      .delete(`/api/categories/${categoryId}`)
+      .set('Authorization', `Bearer ${token}`).expect(204);
+  });
+
+  it("ignores another user's bills when counting", async () => {
+    // The count must be scoped to the owner, or user B's bill would make
+    // user A's same-named category undeletable.
+    const { token } = await registerAs('a@example.com');
+    await registerAs('b@example.com');
+    const cats = await request(app.getHttpServer())
+      .get('/api/categories').set('Authorization', `Bearer ${token}`).expect(200);
+    await request(app.getHttpServer())
+      .delete(`/api/categories/${cats.body[0].id}`)
+      .set('Authorization', `Bearer ${token}`).expect(204);
+  });
+});
