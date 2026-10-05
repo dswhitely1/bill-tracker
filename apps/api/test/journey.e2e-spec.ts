@@ -30,10 +30,21 @@ beforeAll(async () => {
   // actually used stayed at 15m even though process.env read back '1s').
   // `vi.resetModules()` plus a dynamic re-import forces `app.module.ts` (and
   // `config.module.ts` beneath it) to re-evaluate from scratch, with the env
-  // var we just set, giving this file its own correctly-read 1s TTL without
-  // touching any other spec file's already-bound imports.
+  // var we just set, giving this file its own correctly-read short TTL
+  // without touching any other spec file's already-bound imports.
+  //
+  // The TTL itself is 5s, not 1s. This spec needs a token that both EXPIRES
+  // (step 3, after sleeping past the TTL) and a token that is still VALID
+  // immediately after being minted (steps 2 and 4 — step 4 in particular
+  // uses an access token the instant `POST /api/auth/refresh` returns it,
+  // with no sleep in between). At 1s, that immediate-use margin is thin
+  // enough for ordinary scheduling jitter under load to eat it, and step 4
+  // intermittently failed with a 401 that read like a broken guard rather
+  // than what it was: a bad TTL choice, not a flaky test or a broken guard.
+  // 5s leaves single-request latency nowhere near the boundary while still
+  // making the deliberate 5.5s sleep in step 3 a trivial, one-time cost.
   previousTtl = process.env.JWT_ACCESS_TTL;
-  process.env.JWT_ACCESS_TTL = '1s'; // must be set BEFORE the re-import below
+  process.env.JWT_ACCESS_TTL = '5s'; // must be set BEFORE the re-import below
   process.env.ENV_FILE = '.env.test';
   vi.resetModules();
   const { AppModule } = await import('../src/app/app.module');
@@ -85,8 +96,8 @@ describe('full token lifecycle', () => {
     await request(server).get('/api/users/me')
       .set('Authorization', `Bearer ${firstAccess}`).expect(200);
 
-    // 3. This file's beforeAll rebuilt the app with JWT_ACCESS_TTL=1s, so this is a real expiry, not a mock.
-    await sleep(1500);
+    // 3. This file's beforeAll rebuilt the app with JWT_ACCESS_TTL=5s, so this is a real expiry, not a mock.
+    await sleep(5500);
     await request(server).get('/api/users/me')
       .set('Authorization', `Bearer ${firstAccess}`).expect(401);
 
