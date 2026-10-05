@@ -5,6 +5,7 @@ import { BillInstance } from './bill-instance.entity';
 import { PaymentLog } from './payment-log.entity';
 import { Category } from '../categories/category.entity';
 import { BillGeneratorService } from './bill-generator.service';
+import { BillScheduler } from './bill.scheduler';
 import { BillsService } from './bills.service';
 import { BillsController } from './bills.controller';
 import { BillInstancesService } from './bill-instances.service';
@@ -22,7 +23,13 @@ import { PaymentsController } from './payments.controller';
   // during Task 9 by swapping the order below and re-running the e2e
   // suite — both orders pass identically.
   controllers: [BillsController, BillInstancesController, PaymentsController],
-  providers: [BillGeneratorService, BillsService, BillInstancesService, PaymentsService],
+  providers: [
+    BillGeneratorService,
+    BillScheduler,
+    BillsService,
+    BillInstancesService,
+    PaymentsService,
+  ],
   exports: [BillGeneratorService, BillInstancesService],
 })
 export class BillsModule {}

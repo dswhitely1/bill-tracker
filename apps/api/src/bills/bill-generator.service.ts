@@ -1,4 +1,4 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { InjectRepository } from '@nestjs/typeorm';
 import { EntityManager, Repository } from 'typeorm';
@@ -9,6 +9,8 @@ import type { Env } from '../config/env.schema';
 
 @Injectable()
 export class BillGeneratorService {
+  private readonly logger = new Logger(BillGeneratorService.name);
+
   constructor(
     @InjectRepository(Bill) private readonly bills: Repository<Bill>,
     private readonly config: ConfigService<Env, true>,
@@ -52,11 +54,36 @@ export class BillGeneratorService {
     return inserted.length;
   }
 
+  /**
+   * Materializes every active bill, isolating failures so one bad bill
+   * cannot abort the sweep for the rest. This runs unattended (startup and
+   * nightly, via `BillScheduler`) where there is no caller left to retry a
+   * thrown error — the old all-or-nothing loop meant a single failing bill
+   * silently stopped every bill after it in iteration order. Each failure
+   * is logged with the bill's id and name so it can be found and fixed,
+   * and a summary warning fires at the end if any bill failed, so a sweep
+   * that materialized instances for every other bill never reports as a
+   * clean, fully-successful run.
+   */
   async materializeAll(): Promise<number> {
     const active = await this.bills.find({ where: { isActive: true } });
     let total = 0;
+    let failures = 0;
     for (const bill of active) {
-      total += await this.materializeForBill(bill);
+      try {
+        total += await this.materializeForBill(bill);
+      } catch (error) {
+        failures += 1;
+        this.logger.error(
+          `materializeForBill failed for bill ${bill.id} ("${bill.name}")`,
+          error as Error,
+        );
+      }
+    }
+    if (failures > 0) {
+      this.logger.warn(
+        `materializeAll completed with ${failures} failure(s) out of ${active.length} bill(s)`,
+      );
     }
     return total;
   }
