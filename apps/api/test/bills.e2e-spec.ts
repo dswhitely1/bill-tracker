@@ -274,4 +274,56 @@ describe('PATCH /api/bills/:id', () => {
       .patch(`/api/bills/${bill.body.id}`).set('Authorization', `Bearer ${token}`)
       .send({ endDate: '2025-01-01' }).expect(400);
   });
+
+  it('deactivating over HTTP removes future rewritable instances', async () => {
+    // Regression for a DTO bug: PartialType(CreateBillDto) carries no
+    // isActive property at all (CreateBillDto never had one), so the
+    // global ValidationPipe({ whitelist: true }) would silently strip an
+    // isActive sent in the body before it reached the service. A test that
+    // calls BillsService.update() directly (as bill-rewrite.int-spec.ts
+    // does) bypasses that pipe and cannot catch this — only a real HTTP
+    // round trip can. If the field were stripped again, res.body.isActive
+    // would come back true and the query below would still find rows.
+    const { token } = await registerAs('a@example.com');
+    const bill = await request(app.getHttpServer()).post('/api/bills')
+      .set('Authorization', `Bearer ${token}`).send(makeBill()).expect(201);
+
+    const before = await ds.query(
+      'SELECT count(*)::int AS n FROM bill_instances WHERE bill_id = $1 AND due_date > CURRENT_DATE',
+      [bill.body.id],
+    );
+    expect(before[0].n).toBeGreaterThan(0);
+
+    const res = await request(app.getHttpServer())
+      .patch(`/api/bills/${bill.body.id}`).set('Authorization', `Bearer ${token}`)
+      .send({ isActive: false }).expect(200);
+    expect(res.body.isActive).toBe(false);
+
+    const after = await ds.query(
+      'SELECT count(*)::int AS n FROM bill_instances WHERE bill_id = $1 AND due_date > CURRENT_DATE',
+      [bill.body.id],
+    );
+    expect(after[0].n).toBe(0);
+  });
+
+  it('reactivating over HTTP regenerates future instances', async () => {
+    const { token } = await registerAs('a@example.com');
+    const bill = await request(app.getHttpServer()).post('/api/bills')
+      .set('Authorization', `Bearer ${token}`).send(makeBill()).expect(201);
+
+    await request(app.getHttpServer())
+      .patch(`/api/bills/${bill.body.id}`).set('Authorization', `Bearer ${token}`)
+      .send({ isActive: false }).expect(200);
+
+    const res = await request(app.getHttpServer())
+      .patch(`/api/bills/${bill.body.id}`).set('Authorization', `Bearer ${token}`)
+      .send({ isActive: true }).expect(200);
+    expect(res.body.isActive).toBe(true);
+
+    const after = await ds.query(
+      'SELECT count(*)::int AS n FROM bill_instances WHERE bill_id = $1 AND due_date > CURRENT_DATE',
+      [bill.body.id],
+    );
+    expect(after[0].n).toBeGreaterThan(0);
+  });
 });

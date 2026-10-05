@@ -186,7 +186,7 @@ describe('rewriteForBill', () => {
     expect((await instancesOf(bill)).filter((r) => r.dueDate > T()).length).toBeGreaterThan(0);
   });
 
-  it('extends the set when start_date moves earlier and end_date is removed', async () => {
+  it('extends the set when end_date is removed', async () => {
     const bill = await seedBill({ endDate: addMonths(T(), 2) });
     await generator.materializeForBill(bill);
     const before = (await instancesOf(bill)).length;
