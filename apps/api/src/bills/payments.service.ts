@@ -1,7 +1,11 @@
-import { BadRequestException, Injectable } from '@nestjs/common';
+import {
+  BadRequestException, ConflictException, Injectable, NotFoundException,
+} from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
-import type { PaymentLogResponse, PaymentResultResponse } from '@bill-tracker/shared-types';
+import type {
+  BillInstanceResponse, PaymentLogResponse, PaymentResultResponse,
+} from '@bill-tracker/shared-types';
 import { BillInstance } from './bill-instance.entity';
 import { PaymentLog } from './payment-log.entity';
 import { BillInstancesService } from './bill-instances.service';
@@ -77,5 +81,99 @@ export class PaymentsService {
       order: { paidAt: 'ASC', createdAt: 'ASC' },
     });
     return rows.map(toPaymentResponse);
+  }
+
+  /**
+   * Appends the exact negation of a payment — spec §6.3. Nothing is ever
+   * deleted or mutated: `payment_logs` is append-only, so "I mis-clicked"
+   * stays visible instead of being erased.
+   */
+  async reverse(
+    userId: string, instanceId: string, paymentId: string,
+  ): Promise<PaymentResultResponse> {
+    return this.logs.manager.transaction(async (manager) => {
+      const { instance, bill } = await this.instances.loadOwnedLocked(
+        userId, instanceId, manager,
+      );
+      const logRepo = manager.getRepository(PaymentLog);
+
+      // Scoped to this instance and this user, so someone else's payment is
+      // indistinguishable from one that does not exist.
+      const target = await logRepo.findOne({
+        where: { id: paymentId, billInstanceId: instance.id, userId },
+      });
+      if (!target) throw new NotFoundException('Payment not found');
+
+      if (target.reversesPaymentId !== null) {
+        throw new ConflictException(
+          'A reversal cannot itself be reversed — record a new payment instead',
+        );
+      }
+      const already = await logRepo.findOne({ where: { reversesPaymentId: target.id } });
+      if (already) throw new ConflictException('That payment has already been reversed');
+
+      const reversal = await logRepo.save(
+        logRepo.create({
+          billInstanceId: instance.id,
+          userId,
+          amountPaid: -target.amountPaid,
+          paidAt: new Date(),
+          note: null,
+          reversesPaymentId: target.id,
+        }),
+      );
+
+      await this.instances.recompute(instance, manager);
+      const saved = await manager.getRepository(BillInstance).save(instance);
+
+      return {
+        instance: toInstanceResponse(saved, bill, this.generator.today()),
+        payment: toPaymentResponse(reversal),
+      };
+    });
+  }
+
+  /**
+   * The misclick button: reverses every unreversed payment at once. Sugar
+   * over the same primitive, not a second mechanism.
+   */
+  async unpay(userId: string, instanceId: string): Promise<BillInstanceResponse> {
+    return this.logs.manager.transaction(async (manager) => {
+      const { instance, bill } = await this.instances.loadOwnedLocked(
+        userId, instanceId, manager,
+      );
+      const logRepo = manager.getRepository(PaymentLog);
+
+      const outstanding: Array<{ id: string; amount_paid: string }> = await manager.query(
+        `SELECT p."id", p."amount_paid"
+           FROM "payment_logs" p
+          WHERE p."bill_instance_id" = $1
+            AND p."reverses_payment_id" IS NULL
+            AND NOT EXISTS (
+              SELECT 1 FROM "payment_logs" r WHERE r."reverses_payment_id" = p."id")`,
+        [instance.id],
+      );
+      if (outstanding.length === 0) {
+        throw new ConflictException('This bill instance has no payments to reverse');
+      }
+
+      const now = new Date();
+      await logRepo.save(
+        outstanding.map((row) =>
+          logRepo.create({
+            billInstanceId: instance.id,
+            userId,
+            amountPaid: -Number(row.amount_paid),
+            paidAt: now,
+            note: null,
+            reversesPaymentId: row.id,
+          }),
+        ),
+      );
+
+      await this.instances.recompute(instance, manager);
+      const saved = await manager.getRepository(BillInstance).save(instance);
+      return toInstanceResponse(saved, bill, this.generator.today());
+    });
   }
 }

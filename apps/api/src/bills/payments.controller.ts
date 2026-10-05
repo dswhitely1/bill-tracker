@@ -20,4 +20,13 @@ export class PaymentsController {
   ) {
     return this.payments.record(userId, id, dto);
   }
+
+  @Post(':paymentId/reverse')
+  reverse(
+    @CurrentUser() userId: string,
+    @Param('id', ParseUUIDPipe) id: string,
+    @Param('paymentId', ParseUUIDPipe) paymentId: string,
+  ) {
+    return this.payments.reverse(userId, id, paymentId);
+  }
 }

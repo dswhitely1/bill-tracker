@@ -92,3 +92,20 @@ describe('concurrent payments on one instance', () => {
     expect(row.status).toBe('PAID');
   });
 });
+
+describe('reversal uniqueness', () => {
+  it('rejects a duplicate reversal at the database level, not just in the service', async () => {
+    const { instanceId, userId: uid } = await seedInstance({ amount: 100 });
+    const { payment } = await payments.record(uid, instanceId, { amount: 100 });
+    await payments.reverse(uid, instanceId, payment.id);
+
+    await expect(
+      ds.query(
+        `INSERT INTO "payment_logs"
+           ("bill_instance_id","user_id","amount_paid","paid_at","reverses_payment_id")
+         VALUES ($1, $2, -100, now(), $3)`,
+        [instanceId, uid, payment.id],
+      ),
+    ).rejects.toThrow(/UQ_payment_logs_reverses|duplicate key/);
+  });
+});

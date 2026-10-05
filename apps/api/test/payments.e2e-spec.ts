@@ -214,3 +214,157 @@ describe('PATCH /api/bill-instances/:id amount-vs-amount_paid guard', () => {
     expect(JSON.stringify(res.body)).toContain('800.00');
   });
 });
+
+describe('POST .../payments/:paymentId/reverse', () => {
+  it('appends a negation and walks the status back', async () => {
+    const { token } = await setup('a@example.com');
+    const instance = await firstInstance(token);
+    const paid = await request(app.getHttpServer())
+      .post(`/api/bill-instances/${instance.id}/payments`).set(auth(token))
+      .send({ amount: 800 }).expect(201);
+
+    const res = await request(app.getHttpServer())
+      .post(`/api/bill-instances/${instance.id}/payments/${paid.body.payment.id}/reverse`)
+      .set(auth(token)).expect(201);
+
+    expect(res.body.payment).toMatchObject({
+      amountPaid: -800, reversesPaymentId: paid.body.payment.id,
+    });
+    expect(res.body.instance).toMatchObject({
+      status: 'UNPAID', amountPaid: 0, paidAt: null,
+    });
+
+    // Nothing was deleted: the log keeps both rows.
+    const log = await request(app.getHttpServer())
+      .get(`/api/bill-instances/${instance.id}/payments`).set(auth(token)).expect(200);
+    expect(log.body).toHaveLength(2);
+    expect(log.body.map((p: { amountPaid: number }) => p.amountPaid)).toEqual([800, -800]);
+  });
+
+  it('walks a fully paid bill back to PARTIALLY_PAID', async () => {
+    const { token } = await setup('a@example.com');
+    const instance = await firstInstance(token);
+    const first = await request(app.getHttpServer())
+      .post(`/api/bill-instances/${instance.id}/payments`).set(auth(token))
+      .send({ amount: 800 }).expect(201);
+    await request(app.getHttpServer())
+      .post(`/api/bill-instances/${instance.id}/payments`).set(auth(token))
+      .send({}).expect(201);
+
+    const res = await request(app.getHttpServer())
+      .post(`/api/bill-instances/${instance.id}/payments/${first.body.payment.id}/reverse`)
+      .set(auth(token)).expect(201);
+    expect(res.body.instance).toMatchObject({
+      status: 'PARTIALLY_PAID', amountPaid: 1000, paidAt: null,
+    });
+  });
+
+  it('refuses to reverse the same payment twice', async () => {
+    const { token } = await setup('a@example.com');
+    const instance = await firstInstance(token);
+    const paid = await request(app.getHttpServer())
+      .post(`/api/bill-instances/${instance.id}/payments`).set(auth(token))
+      .send({ amount: 100 }).expect(201);
+    const reverse = () =>
+      request(app.getHttpServer())
+        .post(`/api/bill-instances/${instance.id}/payments/${paid.body.payment.id}/reverse`)
+        .set(auth(token));
+
+    await reverse().expect(201);
+    await reverse().expect(409);
+  });
+
+  it('refuses to reverse a reversal', async () => {
+    const { token } = await setup('a@example.com');
+    const instance = await firstInstance(token);
+    const paid = await request(app.getHttpServer())
+      .post(`/api/bill-instances/${instance.id}/payments`).set(auth(token))
+      .send({ amount: 100 }).expect(201);
+    const reversal = await request(app.getHttpServer())
+      .post(`/api/bill-instances/${instance.id}/payments/${paid.body.payment.id}/reverse`)
+      .set(auth(token)).expect(201);
+
+    await request(app.getHttpServer())
+      .post(`/api/bill-instances/${instance.id}/payments/${reversal.body.payment.id}/reverse`)
+      .set(auth(token)).expect(409);
+  });
+
+  it('404s on a payment belonging to a different instance', async () => {
+    const { token } = await setup('a@example.com');
+    // A literal 2026-01-01..2027-12-31 range is 729 days — over this
+    // API's 400-day cap, so it would 400 before this test could even run.
+    // The anchored window helpers used elsewhere in this file stay inside
+    // the cap while still covering more than one instance.
+    const list = await request(app.getHttpServer())
+      .get(`/api/bill-instances?${mainWindowQs()}`).set(auth(token)).expect(200);
+    const [one, two] = list.body as Array<{ id: string }>;
+    const paid = await request(app.getHttpServer())
+      .post(`/api/bill-instances/${one.id}/payments`).set(auth(token))
+      .send({ amount: 10 }).expect(201);
+
+    await request(app.getHttpServer())
+      .post(`/api/bill-instances/${two.id}/payments/${paid.body.payment.id}/reverse`)
+      .set(auth(token)).expect(404);
+  });
+
+  it("404s on another user's payment", async () => {
+    const { token: mine } = await setup('a@example.com');
+    const { token: theirs } = await setup('b@example.com');
+    const target = await firstInstance(theirs);
+    const paid = await request(app.getHttpServer())
+      .post(`/api/bill-instances/${target.id}/payments`).set(auth(theirs))
+      .send({ amount: 10 }).expect(201);
+
+    await request(app.getHttpServer())
+      .post(`/api/bill-instances/${target.id}/payments/${paid.body.payment.id}/reverse`)
+      .set(auth(mine)).expect(404);
+  });
+});
+
+describe('POST /api/bill-instances/:id/unpay', () => {
+  it('reverses every unreversed payment in one call', async () => {
+    const { token } = await setup('a@example.com');
+    const instance = await firstInstance(token);
+    for (const amount of [500, 500, 800]) {
+      await request(app.getHttpServer())
+        .post(`/api/bill-instances/${instance.id}/payments`).set(auth(token))
+        .send({ amount }).expect(201);
+    }
+
+    const res = await request(app.getHttpServer())
+      .post(`/api/bill-instances/${instance.id}/unpay`).set(auth(token)).expect(200);
+
+    expect(res.body).toMatchObject({ status: 'UNPAID', amountPaid: 0, paidAt: null });
+    const log = await request(app.getHttpServer())
+      .get(`/api/bill-instances/${instance.id}/payments`).set(auth(token)).expect(200);
+    expect(log.body).toHaveLength(6); // three payments, three reversals
+    expect(log.body.filter((p: { amountPaid: number }) => p.amountPaid < 0)).toHaveLength(3);
+  });
+
+  it('409s when there is nothing to reverse', async () => {
+    const { token } = await setup('a@example.com');
+    const instance = await firstInstance(token);
+    await request(app.getHttpServer())
+      .post(`/api/bill-instances/${instance.id}/unpay`).set(auth(token)).expect(409);
+  });
+
+  it('409s when every payment is already reversed', async () => {
+    const { token } = await setup('a@example.com');
+    const instance = await firstInstance(token);
+    await request(app.getHttpServer())
+      .post(`/api/bill-instances/${instance.id}/payments`).set(auth(token))
+      .send({ amount: 100 }).expect(201);
+    await request(app.getHttpServer())
+      .post(`/api/bill-instances/${instance.id}/unpay`).set(auth(token)).expect(200);
+    await request(app.getHttpServer())
+      .post(`/api/bill-instances/${instance.id}/unpay`).set(auth(token)).expect(409);
+  });
+
+  it("404s for another user's instance", async () => {
+    const { token: mine } = await setup('a@example.com');
+    const { token: theirs } = await setup('b@example.com');
+    const target = await firstInstance(theirs);
+    await request(app.getHttpServer())
+      .post(`/api/bill-instances/${target.id}/unpay`).set(auth(mine)).expect(404);
+  });
+});

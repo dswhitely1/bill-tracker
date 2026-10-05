@@ -1,12 +1,18 @@
-import { Body, Controller, Get, Param, ParseUUIDPipe, Patch, Query } from '@nestjs/common';
+import {
+  Body, Controller, Get, HttpCode, HttpStatus, Param, ParseUUIDPipe, Patch, Post, Query,
+} from '@nestjs/common';
 import { BillInstancesService } from './bill-instances.service';
+import { PaymentsService } from './payments.service';
 import { ListInstancesDto } from './dto/list-instances.dto';
 import { UpdateBillInstanceDto } from './dto/update-bill-instance.dto';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
 
 @Controller('bill-instances')
 export class BillInstancesController {
-  constructor(private readonly instances: BillInstancesService) {}
+  constructor(
+    private readonly instances: BillInstancesService,
+    private readonly payments: PaymentsService,
+  ) {}
 
   @Get()
   findAll(@CurrentUser() userId: string, @Query() query: ListInstancesDto) {
@@ -25,5 +31,11 @@ export class BillInstancesController {
     @Body() dto: UpdateBillInstanceDto,
   ) {
     return this.instances.update(userId, id, dto);
+  }
+
+  @Post(':id/unpay')
+  @HttpCode(HttpStatus.OK)
+  unpay(@CurrentUser() userId: string, @Param('id', ParseUUIDPipe) id: string) {
+    return this.payments.unpay(userId, id);
   }
 }
