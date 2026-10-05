@@ -1,6 +1,9 @@
-import type { BillInstanceResponse, BillResponse } from '@bill-tracker/shared-types';
+import type {
+  BillInstanceResponse, BillResponse, PaymentLogResponse,
+} from '@bill-tracker/shared-types';
 import { Bill } from './bill.entity';
 import { BillInstance } from './bill-instance.entity';
+import { PaymentLog } from './payment-log.entity';
 import { compare } from './dates';
 
 export const toBillResponse = (bill: Bill): BillResponse => ({
@@ -38,4 +41,13 @@ export const toInstanceResponse = (
   isCustomized: instance.isCustomized,
   paidAt: instance.paidAt === null ? null : instance.paidAt.toISOString(),
   note: instance.note,
+});
+
+export const toPaymentResponse = (log: PaymentLog): PaymentLogResponse => ({
+  id: log.id,
+  billInstanceId: log.billInstanceId,
+  amountPaid: log.amountPaid,
+  paidAt: log.paidAt.toISOString(),
+  note: log.note,
+  reversesPaymentId: log.reversesPaymentId,
 });
