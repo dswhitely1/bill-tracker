@@ -128,6 +128,22 @@ describe('POST /api/bills', () => {
   it('requires a token', async () => {
     await request(app.getHttpServer()).post('/api/bills').send(makeBill()).expect(401);
   });
+
+  it('ignores a client-supplied isActive and always creates an active, materialized bill', async () => {
+    // Regression for Finding 1: isActive is not on CreateBillRequest. If the
+    // DTO ever re-admits it, `whitelist: true` would keep it and a client
+    // could create a bill with zero materialized instances.
+    const { token } = await registerAs('a@example.com');
+    const res = await request(app.getHttpServer())
+      .post('/api/bills').set('Authorization', `Bearer ${token}`)
+      .send(makeBill({ isActive: false })).expect(201);
+    expect(res.body.isActive).toBe(true);
+
+    const count = await ds.query(
+      'SELECT count(*)::int AS n FROM bill_instances WHERE bill_id = $1', [res.body.id],
+    );
+    expect(count[0].n).toBeGreaterThan(0);
+  });
 });
 
 describe('GET /api/bills', () => {
@@ -142,6 +158,27 @@ describe('GET /api/bills', () => {
     const res = await request(app.getHttpServer())
       .get('/api/bills').set('Authorization', `Bearer ${mine}`).expect(200);
     expect(res.body.map((b: { name: string }) => b.name)).toEqual(['Mine']);
+  });
+
+  it('filters by isActive', async () => {
+    // POST can no longer create an inactive bill (Finding 1), so the
+    // inactive fixture is inserted directly.
+    const { token, userId } = await registerAs('a@example.com');
+    await request(app.getHttpServer()).post('/api/bills')
+      .set('Authorization', `Bearer ${token}`).send(makeBill({ name: 'Active' })).expect(201);
+    await ds.query(
+      `INSERT INTO bills (user_id, name, default_amount, frequency, start_date, is_active)
+       VALUES ($1, $2, $3, $4, $5, false)`,
+      [userId, 'Inactive', 50, 'MONTHLY', '2026-01-01'],
+    );
+
+    const onlyActive = await request(app.getHttpServer())
+      .get('/api/bills?isActive=true').set('Authorization', `Bearer ${token}`).expect(200);
+    expect(onlyActive.body.map((b: { name: string }) => b.name)).toEqual(['Active']);
+
+    const onlyInactive = await request(app.getHttpServer())
+      .get('/api/bills?isActive=false').set('Authorization', `Bearer ${token}`).expect(200);
+    expect(onlyInactive.body.map((b: { name: string }) => b.name)).toEqual(['Inactive']);
   });
 });
 

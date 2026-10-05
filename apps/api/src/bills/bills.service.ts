@@ -9,6 +9,13 @@ import { toBillResponse } from './mappers';
 import { CreateBillDto } from './dto/create-bill.dto';
 import { compare } from './dates';
 
+export interface BillValidationFields {
+  amount?: number;
+  startDate: string;
+  endDate: string | null;
+  categoryId: string | null;
+}
+
 @Injectable()
 export class BillsService {
   constructor(
@@ -30,23 +37,37 @@ export class BillsService {
   }
 
   async create(userId: string, dto: CreateBillDto): Promise<BillResponse> {
-    await this.validate(userId, dto.defaultAmount, dto.startDate, dto.endDate ?? null,
-      dto.categoryId ?? null);
+    // Runs against the request-scoped repositories, BEFORE the transaction
+    // below opens — it must never draw a second connection from the pool
+    // while that transaction holds one.
+    await this.validate(userId, {
+      amount: dto.defaultAmount,
+      startDate: dto.startDate,
+      endDate: dto.endDate ?? null,
+      categoryId: dto.categoryId ?? null,
+    });
 
-    const bill = await this.bills.save(
-      this.bills.create({
-        userId,
-        categoryId: dto.categoryId ?? null,
-        name: dto.name,
-        defaultAmount: dto.defaultAmount,
-        frequency: dto.frequency,
-        startDate: dto.startDate,
-        endDate: dto.endDate ?? null,
-        isActive: dto.isActive ?? true,
-      }),
-    );
-    await this.generator.materializeForBill(bill);
-    return toBillResponse(bill);
+    // One transaction: a bill row with no materialized instances must never
+    // be observable. Every query inside uses `manager`, never `this.bills` —
+    // drawing a second connection from the pool while this one holds a
+    // transaction is how a previous sub-project self-deadlocked.
+    return this.bills.manager.transaction(async (manager) => {
+      const bill = await manager.save(
+        Bill,
+        manager.create(Bill, {
+          userId,
+          categoryId: dto.categoryId ?? null,
+          name: dto.name,
+          defaultAmount: dto.defaultAmount,
+          frequency: dto.frequency,
+          startDate: dto.startDate,
+          endDate: dto.endDate ?? null,
+          isActive: true,
+        }),
+      );
+      await this.generator.materializeForBill(bill, manager);
+      return toBillResponse(bill);
+    });
   }
 
   async remove(userId: string, id: string): Promise<void> {
@@ -64,10 +85,8 @@ export class BillsService {
   }
 
   /** The cross-field and ownership rules no single-field decorator can state. */
-  async validate(
-    userId: string, amount: number | undefined, startDate: string,
-    endDate: string | null, categoryId: string | null,
-  ): Promise<void> {
+  async validate(userId: string, fields: BillValidationFields): Promise<void> {
+    const { amount, startDate, endDate, categoryId } = fields;
     if (amount !== undefined && amount <= 0) {
       throw new BadRequestException('defaultAmount must be greater than 0');
     }

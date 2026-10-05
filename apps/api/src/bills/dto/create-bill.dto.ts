@@ -1,5 +1,5 @@
 import {
-  IsBoolean, IsIn, IsNumber, IsOptional, IsString, IsUUID, Max, MaxLength, MinLength,
+  IsIn, IsNumber, IsOptional, IsString, IsUUID, Max, MaxLength, MinLength,
 } from 'class-validator';
 import { Transform } from 'class-transformer';
 import { BILL_FREQUENCIES } from '@bill-tracker/shared-types';
@@ -35,8 +35,4 @@ export class CreateBillDto implements CreateBillRequest {
   @IsOptional()
   @IsUUID()
   categoryId?: string | null;
-
-  @IsOptional()
-  @IsBoolean()
-  isActive?: boolean;
 }
