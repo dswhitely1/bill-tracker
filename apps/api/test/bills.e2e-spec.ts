@@ -266,6 +266,26 @@ describe('PATCH /api/bills/:id', () => {
     expect(unchanged.body.defaultAmount).toBe(1800);
   });
 
+  it("rejects a category belonging to another user and does not attach it", async () => {
+    // Mirrors the create-path test above — PATCH goes through the same
+    // validate(), but is the one that could silently attach a foreign
+    // category to an existing bill rather than merely fail to create one.
+    const { token: mine } = await registerAs('a@example.com');
+    const { token: theirs } = await registerAs('b@example.com');
+    const bill = await request(app.getHttpServer()).post('/api/bills')
+      .set('Authorization', `Bearer ${mine}`).send(makeBill()).expect(201);
+    const theirCats = await request(app.getHttpServer())
+      .get('/api/categories').set('Authorization', `Bearer ${theirs}`).expect(200);
+
+    await request(app.getHttpServer())
+      .patch(`/api/bills/${bill.body.id}`).set('Authorization', `Bearer ${mine}`)
+      .send({ categoryId: theirCats.body[0].id }).expect(400);
+
+    const unchanged = await request(app.getHttpServer())
+      .get(`/api/bills/${bill.body.id}`).set('Authorization', `Bearer ${mine}`).expect(200);
+    expect(unchanged.body.categoryId).toBeNull();
+  });
+
   it('rejects an endDate earlier than the existing startDate', async () => {
     const { token } = await registerAs('a@example.com');
     const bill = await request(app.getHttpServer()).post('/api/bills')
