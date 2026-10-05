@@ -3553,8 +3553,14 @@ git commit -m "feat(api): add ownership-scoped categories CRUD"
 - Consumes: everything built in Tasks 1 through 10.
 - Produces: no new source interfaces.
 
-**The journey spec sets its own TTL.** It needs a genuinely expired access
-token; every other spec needs tokens that survive the test. Scope the short TTL
+**The journey spec sets its own TTL, and setting `process.env` alone is not
+enough.** Vitest freezes the config module's env snapshot at first import, so
+the override must be followed by `vi.resetModules()` and a dynamic re-import of
+the app module — otherwise the app is built with the inherited value and the
+expiry step silently tests nothing.
+
+It needs a genuinely expired access token; every other spec needs tokens that
+survive the test. Scope the short TTL
 to this file, before the app is constructed, and restore it afterwards. Files
 run sequentially (`fileParallelism: false`), so nothing else observes it:
 
@@ -3563,7 +3569,13 @@ let previousTtl: string | undefined;
 
 beforeAll(async () => {
   previousTtl = process.env.JWT_ACCESS_TTL;
-  process.env.JWT_ACCESS_TTL = '1s'; // must be set BEFORE the app is created
+  // 5s, not 1s. This spec needs BOTH a token that expires (step 3) and tokens
+  // that still work (steps 2 and 4), and one TTL governs both. At 1s the
+  // freshly-refreshed token in step 4 can expire between being issued and
+  // being used, which fails as a 401 that looks like a broken guard. 5s is
+  // long enough that an immediate request is never racy, and short enough
+  // that waiting it out costs one sleep.
+  process.env.JWT_ACCESS_TTL = '5s'; // must be set BEFORE the app is created
   process.env.ENV_FILE = '.env.test';
   // ...then build the testing module exactly as the other specs do
 });
@@ -3603,9 +3615,9 @@ describe('full token lifecycle', () => {
     await request(server).get('/api/users/me')
       .set('Authorization', `Bearer ${firstAccess}`).expect(200);
 
-    // 3. This spec set JWT_ACCESS_TTL=1s for itself in beforeAll, so this is a
+    // 3. This spec set JWT_ACCESS_TTL=5s for itself in beforeAll, so this is a
     //    real expiry rather than a mocked clock — and no other spec is affected.
-    await sleep(1500);
+    await sleep(5500);
     await request(server).get('/api/users/me')
       .set('Authorization', `Bearer ${firstAccess}`).expect(401);
 
