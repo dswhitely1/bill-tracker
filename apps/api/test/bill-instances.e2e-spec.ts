@@ -7,10 +7,23 @@ import type { DataSource } from 'typeorm';
 import { AppModule } from '../src/app/app.module';
 import { configureApp } from '../src/app/configure-app';
 import type { Env } from '../src/config/env.schema';
+import { BillGeneratorService } from '../src/bills/bill-generator.service';
+import { addDays } from '../src/bills/dates';
 import { getTestDataSource, truncateAll } from './db';
 
 let app: INestApplication;
 let ds: DataSource;
+
+/**
+ * The generator materializes from the floor occurrence at-or-before real
+ * wall-clock "today", forward ~12 months — never from a bill's startDate.
+ * A fixed calendar window (e.g. `2026-01-01..2026-12-31`) therefore only
+ * contains rows while "today" happens to sit inside it, and silently runs
+ * dry once "today" rolls past it. Every window below is anchored to this
+ * value instead of a literal, and re-derived fresh in `beforeAll` so it
+ * tracks the real clock on every run.
+ */
+let today: string;
 
 beforeAll(async () => {
   process.env.ENV_FILE = '.env.test';
@@ -19,6 +32,7 @@ beforeAll(async () => {
   configureApp(app, app.get(ConfigService<Env, true>));
   await app.init();
   ds = await getTestDataSource();
+  today = app.get(BillGeneratorService).today();
 });
 
 beforeEach(async () => {
@@ -58,12 +72,22 @@ async function setup(email: string, overrides: Record<string, unknown> = {}) {
 }
 
 /**
+ * A window guaranteed to straddle the generator's materialized set no
+ * matter when the suite runs: 60 days back covers the floor occurrence
+ * for every supported frequency, 300 days forward stays comfortably
+ * inside the 400-day cap while covering most of the 12-month horizon.
+ */
+const WINDOW_FROM = () => addDays(today, -60);
+const WINDOW_TO = () => addDays(today, 300);
+const mainWindowQs = () => `from=${WINDOW_FROM()}&to=${WINDOW_TO()}`;
+
+/**
  * The earliest instance of the caller's bills. Declared at module scope,
  * not inside a describe: Tasks 9 and 10 import this helper.
  */
 async function firstInstance(token: string): Promise<{ id: string; amount: number }> {
   const res = await request(app.getHttpServer())
-    .get('/api/bill-instances?from=2026-01-01&to=2026-12-31').set(auth(token)).expect(200);
+    .get(`/api/bill-instances?${mainWindowQs()}`).set(auth(token)).expect(200);
   return res.body[0] as { id: string; amount: number };
 }
 
@@ -71,7 +95,7 @@ describe('GET /api/bill-instances', () => {
   it('returns instances in the range, ascending, with derived fields', async () => {
     const { token, billId } = await setup('a@example.com');
     const res = await request(app.getHttpServer())
-      .get('/api/bill-instances?from=2026-01-01&to=2026-12-31')
+      .get(`/api/bill-instances?${mainWindowQs()}`)
       .set(auth(token)).expect(200);
 
     expect(res.body.length).toBeGreaterThan(0);
@@ -89,42 +113,60 @@ describe('GET /api/bill-instances', () => {
 
   it('honours the range bounds inclusively', async () => {
     const { token } = await setup('a@example.com');
+    // A 90-day window strictly inside the forward horizon: wider than one
+    // MONTHLY period, so it always catches at least one due date, and
+    // anchored to "today" rather than a literal so it never runs dry.
+    const from = addDays(today, 30);
+    const to = addDays(today, 120);
     const res = await request(app.getHttpServer())
-      .get('/api/bill-instances?from=2027-01-01&to=2027-03-31').set(auth(token)).expect(200);
-    expect(res.body.every((i: { dueDate: string }) =>
-      i.dueDate >= '2027-01-01' && i.dueDate <= '2027-03-31')).toBe(true);
+      .get(`/api/bill-instances?from=${from}&to=${to}`).set(auth(token)).expect(200);
+    // An empty result would make the bounds check below pass vacuously —
+    // assert there is something real to check the bounds against.
+    expect(res.body.length).toBeGreaterThan(0);
+    expect(res.body.every((i: { dueDate: string }) => i.dueDate >= from && i.dueDate <= to))
+      .toBe(true);
   });
 
   it('filters by status, billId, and overdue', async () => {
     const { token, billId } = await setup('a@example.com');
+    const total = await request(app.getHttpServer())
+      .get(`/api/bill-instances?${mainWindowQs()}`).set(auth(token)).expect(200);
+    // Guards every .every() below from passing vacuously on an empty window.
+    expect(total.body.length).toBeGreaterThan(0);
+
     const byStatus = await request(app.getHttpServer())
-      .get('/api/bill-instances?from=2026-01-01&to=2026-12-31&status=UNPAID')
+      .get(`/api/bill-instances?${mainWindowQs()}&status=UNPAID`)
       .set(auth(token)).expect(200);
+    expect(byStatus.body.length).toBeGreaterThan(0);
     expect(byStatus.body.every((i: { status: string }) => i.status === 'UNPAID')).toBe(true);
 
     const byBill = await request(app.getHttpServer())
-      .get(`/api/bill-instances?from=2026-01-01&to=2026-12-31&billId=${billId}`)
+      .get(`/api/bill-instances?${mainWindowQs()}&billId=${billId}`)
       .set(auth(token)).expect(200);
+    expect(byBill.body.length).toBeGreaterThan(0);
     expect(byBill.body.every((i: { billId: string }) => i.billId === billId)).toBe(true);
 
     const overdue = await request(app.getHttpServer())
-      .get('/api/bill-instances?from=2026-01-01&to=2026-12-31&overdue=true')
+      .get(`/api/bill-instances?${mainWindowQs()}&overdue=true`)
       .set(auth(token)).expect(200);
     expect(overdue.body.every((i: { isOverdue: boolean }) => i.isOverdue === true)).toBe(true);
 
     const notOverdue = await request(app.getHttpServer())
-      .get('/api/bill-instances?from=2026-01-01&to=2026-12-31&overdue=false')
+      .get(`/api/bill-instances?${mainWindowQs()}&overdue=false`)
       .set(auth(token)).expect(200);
     expect(notOverdue.body.every((i: { isOverdue: boolean }) => i.isOverdue === false))
       .toBe(true);
-    expect(overdue.body.length + notOverdue.body.length).toBe(
-      (await request(app.getHttpServer())
-        .get('/api/bill-instances?from=2026-01-01&to=2026-12-31').set(auth(token))).body.length,
-    );
+    // The two overdue partitions must together account for every row in
+    // the (already confirmed non-empty) unfiltered window — not just sum
+    // to each other, which `0 + 0 === 0` would satisfy vacuously too.
+    expect(overdue.body.length + notOverdue.body.length).toBe(total.body.length);
   });
 
   it('rejects a missing, malformed, or impossible range with a 400', async () => {
     // Review Focus 1: none of these may reach PostgreSQL's date parser.
+    // These exercise pure input validation — reversed, malformed, or
+    // oversized ranges are rejected before any row is ever looked up — so
+    // they stay on fixed literals rather than the data-bearing window.
     const { token } = await setup('a@example.com');
     const bad = (qs: string) =>
       request(app.getHttpServer()).get(`/api/bill-instances${qs}`).set(auth(token)).expect(400);
@@ -143,7 +185,8 @@ describe('GET /api/bill-instances', () => {
     const { token: mine } = await setup('a@example.com', { name: 'Mine' });
     await setup('b@example.com', { name: 'Theirs' });
     const res = await request(app.getHttpServer())
-      .get('/api/bill-instances?from=2026-01-01&to=2026-12-31').set(auth(mine)).expect(200);
+      .get(`/api/bill-instances?${mainWindowQs()}`).set(auth(mine)).expect(200);
+    expect(res.body.length).toBeGreaterThan(0);
     expect(res.body.every((i: { billName: string }) => i.billName === 'Mine')).toBe(true);
   });
 });
@@ -153,7 +196,8 @@ describe('GET /api/bill-instances/:id', () => {
     const { token: mine } = await setup('a@example.com');
     const { token: theirs } = await setup('b@example.com');
     const theirs1 = await request(app.getHttpServer())
-      .get('/api/bill-instances?from=2026-01-01&to=2026-12-31').set(auth(theirs)).expect(200);
+      .get(`/api/bill-instances?${mainWindowQs()}`).set(auth(theirs)).expect(200);
+    expect(theirs1.body.length).toBeGreaterThan(0);
 
     await request(app.getHttpServer())
       .get(`/api/bill-instances/${theirs1.body[0].id}`).set(auth(mine)).expect(404);
