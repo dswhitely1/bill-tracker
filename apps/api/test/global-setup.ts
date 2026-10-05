@@ -3,7 +3,16 @@ import { DataSource } from 'typeorm';
 import { config as loadEnv } from 'dotenv';
 
 export default async function globalSetup() {
-  loadEnv({ path: '.env.test', override: true, quiet: true });
+  const result = loadEnv({ path: '.env.test', override: true, quiet: true });
+  if (result.error) {
+    throw new Error(
+      'Failed to load apps/api/.env.test ' +
+        `(${result.error.message}). dotenv does not throw on a ` +
+        "missing file, so this almost certainly means the process's cwd " +
+        "isn't apps/api — run this suite via `nx test-e2e api` from the " +
+        'workspace root, which sets that cwd for you.',
+    );
+  }
 
   const rawUrl = process.env.DATABASE_URL;
   if (!rawUrl) {
