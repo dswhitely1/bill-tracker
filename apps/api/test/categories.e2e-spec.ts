@@ -119,4 +119,50 @@ describe('categories', () => {
     await request(app.getHttpServer())
       .delete('/api/categories/not-a-uuid').set('Authorization', `Bearer ${token}`).expect(400);
   });
+
+  it('updates the caller’s own category', async () => {
+    const { token } = await registerAs('a@example.com');
+    const created = await request(app.getHttpServer())
+      .post('/api/categories').set('Authorization', `Bearer ${token}`)
+      .send({ name: 'Groceries', color: '#2f80ed' }).expect(201);
+
+    const res = await request(app.getHttpServer())
+      .patch(`/api/categories/${created.body.id}`)
+      .set('Authorization', `Bearer ${token}`)
+      .send({ name: 'Food', color: '#ff0000' })
+      .expect(200);
+
+    expect(res.body.id).toBe(created.body.id);
+    expect(res.body.name).toBe('Food');
+    expect(res.body.color).toBe('#ff0000');
+
+    // The change actually persisted — a service that returned 404 for every
+    // PATCH would never reach this test, but one that accepted any body
+    // without writing it would still pass an assertion on the response
+    // alone.
+    const rows = await ds.query('SELECT name, color FROM categories WHERE id = $1', [
+      created.body.id,
+    ]);
+    expect(rows[0].name).toBe('Food');
+    expect(rows[0].color).toBe('#ff0000');
+  });
+
+  it('deletes the caller’s own category', async () => {
+    const { token } = await registerAs('a@example.com');
+    const created = await request(app.getHttpServer())
+      .post('/api/categories').set('Authorization', `Bearer ${token}`)
+      .send({ name: 'Temporary' }).expect(201);
+
+    await request(app.getHttpServer())
+      .delete(`/api/categories/${created.body.id}`)
+      .set('Authorization', `Bearer ${token}`)
+      .expect(204);
+
+    const res = await request(app.getHttpServer())
+      .get('/api/categories').set('Authorization', `Bearer ${token}`).expect(200);
+    expect(res.body.map((c: { id: string }) => c.id)).not.toContain(created.body.id);
+
+    const rows = await ds.query('SELECT 1 FROM categories WHERE id = $1', [created.body.id]);
+    expect(rows).toHaveLength(0);
+  });
 });
