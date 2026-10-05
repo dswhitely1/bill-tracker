@@ -59,6 +59,15 @@ describe('AllExceptionsFilter', () => {
     expect(status).toHaveBeenCalledWith(HttpStatus.BAD_REQUEST);
   });
 
+  it('maps a not-null violation to 400', () => {
+    const { host, status } = hostFor();
+    const pgError = Object.assign(new Error('null value in column'), { code: '23502' });
+
+    new AllExceptionsFilter().catch(pgError, host);
+
+    expect(status).toHaveBeenCalledWith(HttpStatus.BAD_REQUEST);
+  });
+
   it('preserves an explicit HttpException status and message', () => {
     const { host, status, json } = hostFor();
     new AllExceptionsFilter().catch(new HttpException('Nope', HttpStatus.FORBIDDEN), host);
