@@ -27,7 +27,7 @@ export default async function globalSetup() {
   await admin.destroy();
 
   process.env.ENV_FILE = '.env.test';
-  const { AppDataSource } = await import('../src/database/data-source');
+  const { AppDataSource } = await import('../src/database/data-source.js');
   await AppDataSource.initialize();
   await AppDataSource.runMigrations();
   await AppDataSource.destroy();

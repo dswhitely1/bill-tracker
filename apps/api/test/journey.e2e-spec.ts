@@ -47,7 +47,7 @@ beforeAll(async () => {
   process.env.JWT_ACCESS_TTL = '5s'; // must be set BEFORE the re-import below
   process.env.ENV_FILE = '.env.test';
   vi.resetModules();
-  const { AppModule } = await import('../src/app/app.module');
+  const { AppModule } = await import('../src/app/app.module.js');
   const moduleRef = await Test.createTestingModule({ imports: [AppModule] }).compile();
   app = moduleRef.createNestApplication();
   app.setGlobalPrefix('api');
