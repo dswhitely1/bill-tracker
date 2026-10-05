@@ -5,8 +5,7 @@ import { InjectRepository } from '@nestjs/typeorm';
 import { EntityManager, IsNull, Repository } from 'typeorm';
 import { createHash, randomBytes } from 'node:crypto';
 import { RefreshToken } from './refresh-token.entity';
-import { UsersService } from '../users/users.service';
-import type { User } from '../users/user.entity';
+import { User } from '../users/user.entity';
 import type { Env } from '../config/env.schema';
 
 export const REFRESH_GRACE_MS = 30_000;
@@ -20,12 +19,21 @@ export interface RotationResult {
   expiresAt: Date;
 }
 
+/** Returned, never thrown, so a reject path cannot roll back its own writes. */
+type RotateOutcome =
+  | { ok: true; result: RotationResult }
+  | { ok: false; message: string };
+
+type ChainTip =
+  | { status: 'live'; row: RefreshToken }
+  | { status: 'dead' }
+  | { status: 'exhausted' };
+
 @Injectable()
 export class TokenService {
   constructor(
     @InjectRepository(RefreshToken) private readonly tokens: Repository<RefreshToken>,
     private readonly jwt: JwtService,
-    private readonly users: UsersService,
     private readonly config: ConfigService<Env, true>,
   ) {}
 
@@ -68,19 +76,18 @@ export class TokenService {
   }
 
   async rotate(presented: string): Promise<RotationResult> {
-    if (!presented) throw new UnauthorizedException('Invalid refresh token');
+    // rotate() is the cookie boundary: a non-string value reaching
+    // createHash().update() throws a TypeError, surfacing as 500 instead of 401.
+    if (!presented || typeof presented !== 'string') {
+      throw new UnauthorizedException('Invalid refresh token');
+    }
 
-    // The transaction must COMMIT writes even on the reject paths: a thrown
-    // error inside manager.transaction() rolls everything in it back,
-    // including a chain-kill revocation that is the whole point of this
-    // branch. So every path returns an outcome instead of throwing, and the
-    // UnauthorizedException is only raised once the transaction has settled.
-    type Outcome = { ok: true; result: RotationResult } | { ok: false; message: string };
-
-    // One transaction with a row lock on the presented token. Without it, two
-    // simultaneous requests can both see the token as live and both rotate it,
-    // issuing two successors and orphaning one.
-    const outcome: Outcome = await this.tokens.manager.transaction(async (manager) => {
+    // Every branch RETURNS an outcome; none throws. A throw inside
+    // manager.transaction() rolls the whole transaction back — including the
+    // chain-kill revocation that the replay branch exists to perform, which
+    // would answer "reuse detected" while leaving every stolen sibling live.
+    // The 401 is raised only after the transaction has committed.
+    const outcome: RotateOutcome = await this.tokens.manager.transaction(async (manager) => {
       const repo = manager.getRepository(RefreshToken);
 
       const row = await repo.findOne({
@@ -90,38 +97,41 @@ export class TokenService {
       if (!row) return { ok: false, message: 'Invalid refresh token' };
 
       // Revocation is checked BEFORE expiry. Presenting a revoked token is the
-      // theft signal, and an expired one must not be exempt from it — every
+      // theft signal, and an expired one must not be exempt from it: every
       // rotation issues a fresh expiry, so a chain outlives any single stolen
-      // token, and an attacker who waited out the expiry would escape detection.
+      // token and an attacker who waited out the expiry would escape detection.
       if (row.revokedAt) {
+        // A token that was never rotated cannot have been replayed AFTER
+        // rotation — it was revoked by an explicit logout. Reject it at any
+        // age without touching the user's other devices. This sits ABOVE the
+        // grace test on purpose: a backgrounded tab retrying a dead cookie a
+        // minute after logout must not sign the user out everywhere.
+        if (!row.replacedBy) return { ok: false, message: 'Invalid refresh token' };
+
         const withinGrace = Date.now() - row.revokedAt.getTime() <= REFRESH_GRACE_MS;
         if (!withinGrace) {
           await this.revokeAllForUser(row.userId, manager);
           return { ok: false, message: 'Refresh token reuse detected' };
         }
 
-        if (!row.replacedBy) {
-          // Revoked with no successor ever issued (e.g. an explicit logout):
-          // a benign race with the logout button, not a replay. Reject
-          // without touching the user's other devices.
+        const tip = await this.liveChainTip(row, repo);
+        if (tip.status === 'exhausted') {
+          // Corrupt or absurdly deep chain. Refuse the request, but do not
+          // read it as theft — that would log a user out over bad data.
           return { ok: false, message: 'Invalid refresh token' };
         }
-
-        const tip = await this.liveChainTip(row, repo);
-        if (!tip) {
-          // A successor existed at some point but the entire tail of the
-          // chain is now dead. That is the reuse signature, not a race.
+        if (tip.status === 'dead') {
           await this.revokeAllForUser(row.userId, manager);
           return { ok: false, message: 'Refresh token reuse detected' };
         }
-        return { ok: true, result: await this.rotateRow(tip, repo) };
+        return this.rotateRow(tip.row, repo, manager);
       }
 
       if (row.expiresAt.getTime() <= Date.now()) {
         return { ok: false, message: 'Refresh token expired' };
       }
 
-      return { ok: true, result: await this.rotateRow(row, repo) };
+      return this.rotateRow(row, repo, manager);
     });
 
     if (!outcome.ok) throw new UnauthorizedException(outcome.message);
@@ -129,31 +139,44 @@ export class TokenService {
   }
 
   /**
-   * Walks `replaced_by` forward to the newest link and returns it if it is
-   * still live. Following only the immediate successor would tolerate exactly
-   * two concurrent refreshes and log the user out on the third.
+   * Walks `replaced_by` forward to the newest link. Following only the
+   * immediate successor would tolerate exactly two concurrent refreshes and
+   * log the user out on the third.
    */
   private async liveChainTip(
     start: RefreshToken,
     repo: Repository<RefreshToken>,
-  ): Promise<RefreshToken | null> {
+  ): Promise<ChainTip> {
     let current = start;
     for (let hops = 0; hops < MAX_CHAIN_HOPS; hops += 1) {
-      if (!current.revokedAt) return current;
-      if (!current.replacedBy) return null;
-      const next = await repo.findOne({ where: { id: current.replacedBy } });
-      if (!next) return null;
+      if (!current.revokedAt) return { status: 'live', row: current };
+      if (!current.replacedBy) return { status: 'dead' };
+
+      // Lock every link as we walk. An unlocked read here lets a request
+      // holding a lock on a LATER link rotate it underneath us, orphaning a
+      // live token — the same race the lock on the presented row prevents.
+      // Locks are taken strictly forward along the chain, so no cycle forms.
+      const next = await repo.findOne({
+        where: { id: current.replacedBy },
+        lock: { mode: 'pessimistic_write' },
+      });
+      if (!next) return { status: 'dead' };
       current = next;
     }
-    return null; // bounded: corrupt data cannot loop forever
+    return { status: 'exhausted' };
   }
 
   private async rotateRow(
     row: RefreshToken,
     repo: Repository<RefreshToken>,
-  ): Promise<RotationResult> {
-    const user = await this.users.findById(row.userId);
-    if (!user) throw new UnauthorizedException('Invalid refresh token');
+    manager: EntityManager,
+  ): Promise<RotateOutcome> {
+    // Look the user up through the transaction's OWN manager. Going through
+    // UsersService would draw a second connection from the pool while this
+    // transaction holds one plus its row locks; at pool size (pg default 10)
+    // concurrent rotations, that is a permanent self-deadlock.
+    const user = await manager.getRepository(User).findOne({ where: { id: row.userId } });
+    if (!user) return { ok: false, message: 'Invalid refresh token' };
 
     const next = await this.issueRefreshToken(row.userId, repo);
 
@@ -162,9 +185,12 @@ export class TokenService {
     await repo.save(row);
 
     return {
-      accessToken: this.issueAccessToken(user),
-      refreshToken: next.token,
-      expiresAt: next.expiresAt,
+      ok: true,
+      result: {
+        accessToken: this.issueAccessToken(user),
+        refreshToken: next.token,
+        expiresAt: next.expiresAt,
+      },
     };
   }
 

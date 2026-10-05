@@ -6,6 +6,10 @@ import { verify } from 'jsonwebtoken';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import type { DataSource } from 'typeorm';
 import { TokenService, REFRESH_GRACE_MS } from '../src/auth/token.service';
+
+// MAX_CHAIN_HOPS is private to the service; 16 is its value, and the loop below
+// needs to exceed it. If the bound changes, this must change with it.
+const MAX_CHAIN_HOPS_FOR_TEST = 16;
 import { RefreshToken } from '../src/auth/refresh-token.entity';
 import { User } from '../src/users/user.entity';
 import { UsersModule } from '../src/users/users.module';
@@ -30,7 +34,10 @@ beforeEach(async () => {
         synchronize: false,
       }),
       TypeOrmModule.forFeature([RefreshToken]),
-      JwtModule.register({ secret: process.env.JWT_ACCESS_SECRET }),
+      // Deliberately NOT the configured secret. If issueAccessToken ever drops
+      // its explicit `secret`, jwt.sign falls back to this one and verification
+      // against JWT_ACCESS_SECRET fails — which is the point.
+      JwtModule.register({ secret: 'module-fallback-secret-never-used-in-prod' }),
       UsersModule,
     ],
     providers: [TokenService],
@@ -168,6 +175,55 @@ describe('TokenService.rotate', () => {
     const rows = await ds.query(`SELECT revoked_at FROM refresh_tokens`);
     expect(rows[0].revoked_at).not.toBeNull();
     await expect(tokens.rotate(first.token)).rejects.toThrow(/Invalid refresh token/i);
+  });
+
+  it('rejects a logged-out token long after the window without killing other devices',
+    async () => {
+      const first = await tokens.issueRefreshToken(userId);
+      const other = await tokens.issueRefreshToken(userId); // another device
+      await tokens.revoke(first.token);
+      await ds.query(
+        `UPDATE refresh_tokens SET revoked_at = now() - interval '5 minutes'
+         WHERE revoked_at IS NOT NULL`,
+      );
+
+      // A backgrounded tab retrying a dead cookie minutes after logout is not
+      // a replay: the token was never rotated, so it has no successor to steal.
+      await expect(tokens.rotate(first.token)).rejects.toThrow(/Invalid refresh token/i);
+
+      const live = await ds.query(`SELECT 1 FROM refresh_tokens WHERE revoked_at IS NULL`);
+      expect(live).toHaveLength(1);
+      await expect(tokens.rotate(other.token)).resolves.toBeTruthy();
+    });
+
+  it('refuses an over-deep chain without treating it as theft', async () => {
+    const first = await tokens.issueRefreshToken(userId);
+    let current = await tokens.rotate(first.token);
+    for (let i = 0; i < MAX_CHAIN_HOPS_FOR_TEST; i += 1) {
+      current = await tokens.rotate(current.refreshToken);
+    }
+
+    // Walking from `first` now exceeds the hop bound. Bad data must not be
+    // read as a theft signal — the user keeps their session.
+    await expect(tokens.rotate(first.token)).rejects.toThrow(/Invalid refresh token/i);
+    const live = await ds.query(`SELECT 1 FROM refresh_tokens WHERE revoked_at IS NULL`);
+    expect(live).toHaveLength(1);
+  });
+
+  it('serializes two simultaneous rotations of the same token', async () => {
+    const first = await tokens.issueRefreshToken(userId);
+
+    // Genuinely concurrent, unlike the sequential awaits above: both promises
+    // are in flight before either resolves. Without the row lock both can read
+    // the token as live and rotate it, leaving two live successors.
+    const results = await Promise.allSettled([
+      tokens.rotate(first.token),
+      tokens.rotate(first.token),
+    ]);
+
+    expect(results.some((r) => r.status === 'fulfilled')).toBe(true);
+    const live = await ds.query(`SELECT 1 FROM refresh_tokens WHERE revoked_at IS NULL`);
+    expect(live).toHaveLength(1);
   });
 
   it('signs access tokens with the configured secret and TTL', async () => {
