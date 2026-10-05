@@ -1,5 +1,6 @@
-import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
+import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { Test, TestingModule } from '@nestjs/testing';
+import { Logger } from '@nestjs/common';
 import type { DataSource } from 'typeorm';
 import { AppModule } from '../src/app/app.module';
 import { BillGeneratorService } from '../src/bills/bill-generator.service';
@@ -121,5 +122,56 @@ describe('BillGeneratorService.materializeAll', () => {
     await generator.materializeAll();
     expect((await instancesOf(active)).length).toBeGreaterThan(0);
     expect(await instancesOf(inactive)).toHaveLength(0);
+  });
+
+  it('isolates a failing bill: the rest still materialize, the return value counts only successes, and the failure is logged', async () => {
+    // This is the Task 6 defect this task fixed: materializeAll() used to
+    // iterate with no error isolation, so one bill throwing aborted the
+    // sweep for every bill after it. Induce a failure on exactly one bill
+    // by spying on the resolved provider's own materializeForBill — a real
+    // class method, not an ESM namespace export, so vi.spyOn works here —
+    // and delegate to the real implementation for every other bill.
+    const good1 = await seedBill({ name: 'Good 1' });
+    const good2 = await seedBill({ name: 'Good 2' });
+    const bad = await seedBill({ name: 'Bad' });
+
+    const original = generator.materializeForBill.bind(generator);
+    const materializeSpy = vi
+      .spyOn(generator, 'materializeForBill')
+      .mockImplementation((bill, manager) =>
+        bill.id === bad.id ? Promise.reject(new Error('simulated failure')) : original(bill, manager),
+      );
+    // Logger.prototype.error/warn are real instance methods (see
+    // logger.service.js) — spy on them to assert the failure is surfaced
+    // rather than swallowed, without caring about actual console output.
+    const errorSpy = vi.spyOn(Logger.prototype, 'error').mockImplementation(() => undefined);
+    const warnSpy = vi.spyOn(Logger.prototype, 'warn').mockImplementation(() => undefined);
+
+    try {
+      const inserted = await generator.materializeAll();
+
+      const good1Rows = await instancesOf(good1);
+      const good2Rows = await instancesOf(good2);
+      const badRows = await instancesOf(bad);
+
+      // 1. The other bills still get materialized.
+      expect(good1Rows.length).toBeGreaterThan(0);
+      expect(good2Rows.length).toBeGreaterThan(0);
+      expect(badRows).toHaveLength(0);
+
+      // 2. The return value counts only successes — the failed bill's
+      // would-be rows are not in it.
+      expect(inserted).toBe(good1Rows.length + good2Rows.length);
+
+      // 3. The failure is visible: an error identifying the bill, plus a
+      // summary warning. A sweep that silently reported success while
+      // skipping a bill is exactly what this test must catch.
+      expect(errorSpy).toHaveBeenCalledWith(expect.stringContaining(bad.id), expect.anything());
+      expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining('1 failure'));
+    } finally {
+      materializeSpy.mockRestore();
+      errorSpy.mockRestore();
+      warnSpy.mockRestore();
+    }
   });
 });
