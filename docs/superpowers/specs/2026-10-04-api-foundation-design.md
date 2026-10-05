@@ -315,9 +315,16 @@ window**. When a revoked token is presented:
    revoke the user's entire chain.
 2. Inside the window, walk `replaced_by` **forward to the newest link in
    the chain**, and rotate that link if it is still live.
-3. Inside the window with no live link — the chain ends revoked — reject
-   the request with 401 but do **not** revoke the chain. That is a logout
-   race, not a theft signal.
+3. Inside the window, if the presented token was **never rotated**
+   (`replaced_by IS NULL`), reject with 401 but do **not** revoke the
+   chain. That is a logout race: a token with no successor cannot have
+   been replayed after rotation, so there is nothing to have been stolen.
+   This is distinct from a token that *was* rotated but whose chain tail
+   is now dead — see the paragraph below, where that case revokes.
+
+   Do not collapse these two into "no live tip". Doing so either leaks a
+   stolen token's siblings on every replay, or signs users out of their
+   other devices over an ordinary logout race.
 
 **Following the chain to its tip, rather than checking only the immediate
 successor, is required.** A single hop tolerates exactly two concurrent
