@@ -33,6 +33,7 @@ export async function truncateAll(dataSource: DataSource): Promise<void> {
   }
 
   await dataSource.query(
-    'TRUNCATE TABLE "refresh_tokens", "categories", "users" RESTART IDENTITY CASCADE',
+    'TRUNCATE TABLE "payment_logs", "bill_instances", "bills", "refresh_tokens", ' +
+      '"categories", "users" RESTART IDENTITY CASCADE',
   );
 }

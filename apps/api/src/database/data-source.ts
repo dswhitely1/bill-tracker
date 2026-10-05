@@ -4,7 +4,11 @@ import { config as loadEnv } from 'dotenv';
 import { User } from '../users/user.entity';
 import { RefreshToken } from '../auth/refresh-token.entity';
 import { Category } from '../categories/category.entity';
+import { Bill } from '../bills/bill.entity';
+import { BillInstance } from '../bills/bill-instance.entity';
+import { PaymentLog } from '../bills/payment-log.entity';
 import { InitialSchema1759536000000 } from './migrations/1759536000000-InitialSchema';
+import { AddBillTables1759622400000 } from './migrations/1759622400000-AddBillTables';
 
 loadEnv({ path: process.env.ENV_FILE ?? '.env', quiet: true });
 
@@ -26,8 +30,8 @@ export const AppDataSource = new DataSource({
   ssl: process.env.DB_SSL === 'true' ? { rejectUnauthorized: true } : false,
   synchronize: false,
   logging: false,
-  entities: [User, RefreshToken, Category],
-  migrations: [InitialSchema1759536000000],
+  entities: [User, RefreshToken, Category, Bill, BillInstance, PaymentLog],
+  migrations: [InitialSchema1759536000000, AddBillTables1759622400000],
   // Without this, a connection checkout the pool can't satisfy hangs
   // forever with no log and no error. Pool sizing (`max`) is left at its
   // default.
