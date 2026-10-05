@@ -2188,17 +2188,24 @@ export class TokenService {
   async rotate(presented: string): Promise<RotationResult> {
     if (!presented) throw new UnauthorizedException('Invalid refresh token');
 
+    // The transaction must COMMIT writes even on the reject paths: a thrown
+    // error inside manager.transaction() rolls everything in it back,
+    // including a chain-kill revocation that is the whole point of this
+    // branch. So every path returns an outcome instead of throwing, and the
+    // UnauthorizedException is only raised once the transaction has settled.
+    type Outcome = { ok: true; result: RotationResult } | { ok: false; message: string };
+
     // One transaction with a row lock on the presented token. Without it, two
     // simultaneous requests can both see the token as live and both rotate it,
     // issuing two successors and orphaning one.
-    return this.tokens.manager.transaction(async (manager) => {
+    const outcome: Outcome = await this.tokens.manager.transaction(async (manager) => {
       const repo = manager.getRepository(RefreshToken);
 
       const row = await repo.findOne({
         where: { tokenHash: this.hash(presented) },
         lock: { mode: 'pessimistic_write' },
       });
-      if (!row) throw new UnauthorizedException('Invalid refresh token');
+      if (!row) return { ok: false, message: 'Invalid refresh token' };
 
       // Revocation is checked BEFORE expiry. Presenting a revoked token is the
       // theft signal, and an expired one must not be exempt from it — every
@@ -2208,24 +2215,35 @@ export class TokenService {
         const withinGrace = Date.now() - row.revokedAt.getTime() <= REFRESH_GRACE_MS;
         if (!withinGrace) {
           await this.revokeAllForUser(row.userId, manager);
-          throw new UnauthorizedException('Refresh token reuse detected');
+          return { ok: false, message: 'Refresh token reuse detected' };
+        }
+
+        if (!row.replacedBy) {
+          // Revoked with no successor ever issued (e.g. an explicit logout):
+          // a benign race with the logout button, not a replay. Reject
+          // without touching the user's other devices.
+          return { ok: false, message: 'Invalid refresh token' };
         }
 
         const tip = await this.liveChainTip(row, repo);
         if (!tip) {
-          // Revoked inside the window with no live successor: a logout race,
-          // not a replay. Reject without killing the user's other devices.
-          throw new UnauthorizedException('Invalid refresh token');
+          // A successor existed at some point but the entire tail of the
+          // chain is now dead. That is the reuse signature, not a race.
+          await this.revokeAllForUser(row.userId, manager);
+          return { ok: false, message: 'Refresh token reuse detected' };
         }
-        return this.rotateRow(tip, repo);
+        return { ok: true, result: await this.rotateRow(tip, repo) };
       }
 
       if (row.expiresAt.getTime() <= Date.now()) {
-        throw new UnauthorizedException('Refresh token expired');
+        return { ok: false, message: 'Refresh token expired' };
       }
 
-      return this.rotateRow(row, repo);
+      return { ok: true, result: await this.rotateRow(row, repo) };
     });
+
+    if (!outcome.ok) throw new UnauthorizedException(outcome.message);
+    return outcome.result;
   }
 
   /**

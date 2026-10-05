@@ -335,8 +335,23 @@ rotation issues a fresh `expires_at`, a chain outlives any single stolen
 token, so an attacker who sits on a stolen token past its expiry would
 escape detection entirely.
 
+**A revoked token with no successor is distinguished from one whose chain
+is dead.** `replaced_by` being null means the token was never rotated — an
+explicit logout — so a request racing the logout button is rejected without
+touching the user's other devices. A token that *was* rotated but whose
+entire chain tail is now revoked is the reuse signature, and the chain dies.
+Collapsing both into "no live tip" would either leak sessions on a theft or
+sign users out of other devices on a logout race.
+
 **Rotation is serialized.** The read-check-write runs in one transaction
-holding a `SELECT ... FOR UPDATE` lock on the presented row. Without it,
+holding a `SELECT ... FOR UPDATE` lock on the presented row.
+
+**Reject paths return an outcome; they do not throw inside the
+transaction.** Throwing inside the transaction callback rolls back
+everything in it — including the chain-kill revocation that the replay
+branch exists to perform. The revocation would be silently undone and the
+stolen token's siblings would stay live. Every branch therefore returns a
+result, and the `401` is raised only after the transaction has committed. Without it,
 two genuinely simultaneous requests can both observe the token as live and
 both rotate it, issuing two successors and orphaning one. The grace window
 handles requests that arrive sequentially; the lock handles those that
