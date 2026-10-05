@@ -109,3 +109,30 @@ describe('reversal uniqueness', () => {
     ).rejects.toThrow(/UQ_payment_logs_reverses|duplicate key/);
   });
 });
+
+describe('payment_logs sign invariant', () => {
+  it('rejects a negative amount with no reverses_payment_id, at the database level', async () => {
+    // A row with a NULL reverses_payment_id is, by the service's own
+    // reading (see reverse() and unpay()), an unreversed positive payment.
+    // Nothing stopped a non-service writer from inserting a negative one
+    // before CHK_payment_logs_sign — this proves the database itself now
+    // refuses that shape, independent of record()'s own `amount > 0` check.
+    const { instanceId, userId: uid } = await seedInstance({ amount: 100 });
+
+    await expect(
+      ds.query(
+        `INSERT INTO "payment_logs"
+           ("bill_instance_id","user_id","amount_paid","paid_at","reverses_payment_id")
+         VALUES ($1, $2, -50, now(), NULL)`,
+        [instanceId, uid],
+      ),
+    ).rejects.toThrow(/CHK_payment_logs_sign|violates check constraint/);
+  });
+});
+
+// Whether the constraint above rejects anything legitimate is proven by the
+// rest of this suite and payments.e2e-spec.ts, not by a dedicated test here:
+// record() inserts positive, null-reverses_payment_id rows throughout
+// "concurrent payments on one instance" above, and reverse()/unpay() insert
+// negative, non-null-reverses_payment_id rows throughout payments.e2e-spec.ts
+// — both shapes the constraint must accept, and both already pass.

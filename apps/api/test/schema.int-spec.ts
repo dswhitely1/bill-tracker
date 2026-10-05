@@ -117,6 +117,15 @@ describe('bill tables', () => {
     expect(index.indexdef).toContain('reverses_payment_id IS NOT NULL');
   });
 
+  it('requires a non-reversal payment_logs row to be positive', async () => {
+    const [check] = (await ds.query(
+      `SELECT pg_get_constraintdef(oid) AS def FROM pg_constraint
+        WHERE conname = 'CHK_payment_logs_sign'`,
+    )) as Array<{ def: string }>;
+    expect(check.def).toContain('reverses_payment_id IS NOT NULL');
+    expect(check.def).toContain('amount_paid > (0)::numeric');
+  });
+
   it('indexes the two query shapes the dashboard and calendar need', async () => {
     const names = (
       (await ds.query(
