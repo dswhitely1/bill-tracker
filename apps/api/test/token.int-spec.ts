@@ -1,5 +1,5 @@
-import { afterAll, beforeEach, describe, expect, it } from 'vitest';
-import { Test } from '@nestjs/testing';
+import { afterAll, afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { Test, TestingModule } from '@nestjs/testing';
 import { ConfigModule } from '@nestjs/config';
 import { JwtModule } from '@nestjs/jwt';
 import { verify } from 'jsonwebtoken';
@@ -19,12 +19,13 @@ import { getTestDataSource, truncateAll } from './db';
 let ds: DataSource;
 let tokens: TokenService;
 let userId: string;
+let moduleRef: TestingModule;
 
 beforeEach(async () => {
   ds = await getTestDataSource();
   await truncateAll(ds);
 
-  const moduleRef = await Test.createTestingModule({
+  moduleRef = await Test.createTestingModule({
     imports: [
       ConfigModule.forRoot({ isGlobal: true, validate: validateEnv, envFilePath: ['.env.test'] }),
       TypeOrmModule.forRoot({
@@ -50,6 +51,16 @@ beforeEach(async () => {
      VALUES ('tok@test.dev', '$2b$10$abcdefghijklmnopqrstuv', 'Tok') RETURNING id`,
   );
   userId = row.id;
+});
+
+afterEach(async () => {
+  // Each beforeEach builds its own TestingModule with its own TypeOrmModule
+  // (and thus its own DataSource and pg pool). Without closing it, 20 tests
+  // mean 20 un-destroyed DataSources and pools in one worker — green today
+  // only because pools are lazy and fileParallelism: false serializes files.
+  // moduleRef.close() runs Nest's shutdown hooks, which is what actually
+  // destroys the underlying TypeORM DataSource.
+  await moduleRef.close();
 });
 
 afterAll(async () => { if (ds?.isInitialized) await ds.destroy(); });
