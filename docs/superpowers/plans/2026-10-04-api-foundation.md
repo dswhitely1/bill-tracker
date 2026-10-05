@@ -1650,6 +1650,15 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import * as bcrypt from 'bcrypt';
 import { UsersService } from './users.service';
 
+// vi.spyOn(bcrypt, 'compare') throws "Cannot redefine property" — an ESM
+// namespace limitation. This factory wraps the REAL implementation rather than
+// stubbing it, so the round-trip tests below still exercise actual bcrypt while
+// the call arguments stay observable.
+vi.mock('bcrypt', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('bcrypt')>();
+  return { ...actual, compare: vi.fn<typeof actual.compare>(actual.compare) };
+});
+
 const config = { get: (k: string) => (k === 'BCRYPT_COST' ? 10 : undefined) };
 
 function serviceWith(repo: Partial<Record<string, unknown>>) {
@@ -1696,19 +1705,18 @@ describe('UsersService', () => {
   });
 
   it('burns a real bcrypt comparison when the user does not exist', async () => {
-    const compareSpy = vi.spyOn(bcrypt, 'compare');
+    const compareMock = bcrypt.compare as unknown as ReturnType<typeof vi.fn>;
+    compareMock.mockClear();
     const service = serviceWith({ findOne });
 
     await expect(service.verifyAgainstDummyHash('anything')).resolves.toBeUndefined();
 
     // A no-op body would satisfy "resolves" but defeat the whole mechanism,
     // so assert the comparison actually happened against a real cost-12 digest.
-    expect(compareSpy).toHaveBeenCalledTimes(1);
-    const [plain, hash] = compareSpy.mock.calls[0];
+    expect(compareMock).toHaveBeenCalledTimes(1);
+    const [plain, hash] = compareMock.mock.calls[0];
     expect(plain).toBe('anything');
     expect(hash).toMatch(/^\$2[aby]\$12\$/);
-
-    compareSpy.mockRestore();
   });
 
   it('rejects an over-byte password before bcrypt can truncate it', async () => {
