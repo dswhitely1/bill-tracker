@@ -6,6 +6,20 @@ const PG_UNIQUE_VIOLATION = '23505';
 const PG_STRING_TOO_LONG = '22001';
 const PG_NOT_NULL_VIOLATION = '23502';
 
+/**
+ * "CONFLICT" -> "Conflict", "INTERNAL_SERVER_ERROR" -> "Internal Server Error".
+ * Matches the title-cased reason phrase Nest's own built-in HttpException
+ * subclasses put in their `error` field (see titleCaseReason's callers below),
+ * so this is only the fallback for statuses that didn't already supply one.
+ */
+function titleCaseReason(status: HttpStatus): string {
+  const name = HttpStatus[status] ?? 'ERROR';
+  return name
+    .split('_')
+    .map((word) => word.charAt(0) + word.slice(1).toLowerCase())
+    .join(' ');
+}
+
 @Catch()
 export class AllExceptionsFilter implements ExceptionFilter {
   private readonly logger = new Logger(AllExceptionsFilter.name);
@@ -17,14 +31,34 @@ export class AllExceptionsFilter implements ExceptionFilter {
 
     let status = HttpStatus.INTERNAL_SERVER_ERROR;
     let message: string | string[] = 'Internal server error';
+    let error = titleCaseReason(status);
+    // Set only for an object-bodied HttpException with no `message` key —
+    // e.g. HealthCheckService.check() throws
+    // ServiceUnavailableException({status, info, error, details}), Terminus's
+    // own structured result. Flattening that into {statusCode, error,
+    // message, path, timestamp} would discard exactly the detail that names
+    // which indicator failed, so it is passed through unchanged instead.
+    let passthroughBody: Record<string, unknown> | undefined;
 
     if (exception instanceof HttpException) {
       status = exception.getStatus();
       const body = exception.getResponse();
-      message =
-        typeof body === 'string'
-          ? body
-          : ((body as { message?: string | string[] }).message ?? exception.message);
+
+      if (typeof body === 'string') {
+        message = body;
+        error = titleCaseReason(status);
+      } else if (body !== null && typeof body === 'object') {
+        const record = body as Record<string, unknown>;
+        if (!('message' in record)) {
+          passthroughBody = record;
+        } else {
+          message = (record.message as string | string[] | undefined) ?? exception.message;
+          error = typeof record.error === 'string' ? record.error : titleCaseReason(status);
+        }
+      } else {
+        message = exception.message;
+        error = titleCaseReason(status);
+      }
     } else {
       const code = (exception as { code?: string })?.code;
       if (code === PG_UNIQUE_VIOLATION) {
@@ -34,6 +68,7 @@ export class AllExceptionsFilter implements ExceptionFilter {
         status = HttpStatus.BAD_REQUEST;
         message = 'Invalid request payload';
       }
+      error = titleCaseReason(status);
     }
 
     if (status >= HttpStatus.INTERNAL_SERVER_ERROR) {
@@ -43,12 +78,14 @@ export class AllExceptionsFilter implements ExceptionFilter {
       );
     }
 
-    response.status(status).json({
-      statusCode: status,
-      error: HttpStatus[status] ?? 'Error',
-      message,
-      path: request.url,
-      timestamp: new Date().toISOString(),
-    });
+    response.status(status).json(
+      passthroughBody ?? {
+        statusCode: status,
+        error,
+        message,
+        path: request.url,
+        timestamp: new Date().toISOString(),
+      },
+    );
   }
 }

@@ -1,4 +1,6 @@
-import { ArgumentsHost, HttpException, HttpStatus, Logger } from '@nestjs/common';
+import {
+  ArgumentsHost, HttpException, HttpStatus, Logger, ServiceUnavailableException,
+} from '@nestjs/common';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { AllExceptionsFilter } from './all-exceptions.filter';
 
@@ -46,6 +48,9 @@ describe('AllExceptionsFilter', () => {
     expect(status).toHaveBeenCalledWith(HttpStatus.CONFLICT);
     const body = json.mock.calls[0][0];
     expect(body.message).toBe('Resource already exists');
+    // Spec §10 publishes "error": "Conflict" (title case), not HttpStatus[409]'s
+    // own "CONFLICT".
+    expect(body.error).toBe('Conflict');
     expect(JSON.stringify(body)).not.toContain('UQ_users_email');
     expect(JSON.stringify(body)).not.toContain('a@b.c');
   });
@@ -74,6 +79,29 @@ describe('AllExceptionsFilter', () => {
 
     expect(status).toHaveBeenCalledWith(HttpStatus.FORBIDDEN);
     expect(json.mock.calls[0][0].message).toBe('Nope');
+    expect(json.mock.calls[0][0].error).toBe('Forbidden');
+  });
+
+  it('passes through an object-bodied HttpException with no message key, unflattened — '
+    + 'the shape HealthCheckService.check() throws when the database ping fails', () => {
+    const { host, status, json } = hostFor('/api/health');
+    const healthFailure = {
+      status: 'error',
+      info: {},
+      error: { database: { status: 'down' } },
+      details: { database: { status: 'down' } },
+    };
+
+    new AllExceptionsFilter().catch(
+      new ServiceUnavailableException(healthFailure),
+      host,
+    );
+
+    expect(status).toHaveBeenCalledWith(HttpStatus.SERVICE_UNAVAILABLE);
+    // The whole Terminus result survives verbatim — naming which indicator
+    // failed — rather than being flattened to a generic
+    // "Service Unavailable Exception" message with the detail discarded.
+    expect(json.mock.calls[0][0]).toEqual(healthFailure);
   });
 
   it('never puts a stack trace in the response body, but does log it server-side', () => {
