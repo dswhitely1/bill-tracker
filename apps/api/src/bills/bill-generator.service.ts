@@ -96,6 +96,17 @@ export class BillGeneratorService {
    * `due_date > today` is strict, not `>=`: an occurrence that is already
    * due was billed at the old amount, and that is a historical fact. The
    * escape hatch for a genuine typo is PATCH on the instance itself.
+   *
+   * Amendment (spec §5.4): a fully reversed payment returns an instance to
+   * `amount_paid = 0`, `status = 'UNPAID'`, `is_customized = false` —
+   * satisfying every clause of REWRITABLE even though it has payment_logs
+   * history. Deleting that row would cascade-delete that history, which
+   * contradicts §6's append-only guarantee. So step 1's DELETE carries an
+   * extra condition — no payment_logs row at all — that step 2's UPDATE
+   * deliberately does not: repricing a genuinely unpaid future occurrence
+   * is correct even if it was once paid and reversed, but deleting a row
+   * destroys a record. Do not fold this into REWRITABLE itself; it must
+   * apply to the DELETE only.
    */
   async rewriteForBill(bill: Bill, manager: EntityManager): Promise<void> {
     const t = this.today();
@@ -114,10 +125,17 @@ export class BillGeneratorService {
     // 1. Drop rewritable instances whose date is no longer an occurrence.
     //    With an empty target (a deactivated bill) `= ANY('{}')` is false,
     //    so NOT(...) is true and every rewritable future row goes.
+    //    The NOT EXISTS guard is the item-2 fix: an instance with any
+    //    payment_logs row — even a fully reversed one — is never deleted,
+    //    because payment_logs.bill_instance_id is ON DELETE CASCADE and
+    //    that history is append-only truth, never erased.
     await manager.query(
       `DELETE FROM "bill_instances"
         WHERE "bill_id" = $1 AND ${REWRITABLE}
-          AND NOT ("due_date" = ANY($3::date[]))`,
+          AND NOT ("due_date" = ANY($3::date[]))
+          AND NOT EXISTS (
+            SELECT 1 FROM "payment_logs" pl
+             WHERE pl."bill_instance_id" = "bill_instances"."id")`,
       [bill.id, t, target],
     );
 

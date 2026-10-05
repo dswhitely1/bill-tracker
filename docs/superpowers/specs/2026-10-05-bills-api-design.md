@@ -311,6 +311,35 @@ No HTTP endpoint triggers generation.
 > `due_date > today AND status = 'UNPAID' AND amount_paid = 0
 > AND is_customized = false`.
 > Template changes rewrite rewritable instances and touch nothing else.
+>
+> **An instance that has any `payment_logs` row is never deleted**, even when
+> it is otherwise rewritable. Its amount may still be repointed.
+
+**Amendment (found by the final whole-branch review).** The predicate above,
+as originally written, contradicted §6. A fully reversed payment returns its
+instance to `amount_paid = 0`, `status = 'UNPAID'`, `is_customized = false` —
+satisfying every clause — so a later template edit deleted the row, and
+`payment_logs.bill_instance_id ON DELETE CASCADE` destroyed its history with
+it. Reproduced: pay a future instance, reverse it, change the template's
+frequency, and the instance's two log rows go to zero.
+
+That is reachable by ordinary use — pay, notice the misclick, `unpay`, later
+adjust the bill — and it breaks §6's "`payment_logs` is the append-only
+truth… nothing is ever deleted or mutated" along with §6.3's promise that a
+misclick "stays visible rather than being erased". Neither section
+anticipated that a reversal makes a row rewritable again.
+
+The rule is therefore split by operation:
+
+- **Step 1's `DELETE` additionally requires that the instance has no
+  `payment_logs` rows at all.** History is what makes a row undeletable, not
+  its current balance.
+- **Step 2's `UPDATE` is unchanged.** Repointing the amount on a genuinely
+  unpaid future occurrence is correct even if it was once paid and reversed:
+  the reversal means it was not paid, so the new amount applies.
+
+This asymmetry is deliberate. Deleting a row destroys a record; repricing an
+unpaid future occurrence does not.
 
 `PATCH /api/bills/:id` accepts `name`, `categoryId`, `defaultAmount`,
 `frequency`, `startDate`, `endDate`, and `isActive` — every field of the

@@ -4,9 +4,11 @@ import type { DataSource } from 'typeorm';
 import { AppModule } from '../src/app/app.module';
 import { BillGeneratorService } from '../src/bills/bill-generator.service';
 import { BillsService } from '../src/bills/bills.service';
+import { PaymentsService } from '../src/bills/payments.service';
 import type { UpdateBillDto } from '../src/bills/dto/update-bill.dto';
 import { Bill } from '../src/bills/bill.entity';
 import { BillInstance } from '../src/bills/bill-instance.entity';
+import { PaymentLog } from '../src/bills/payment-log.entity';
 import { User } from '../src/users/user.entity';
 import { addMonths } from '../src/bills/dates';
 import { getTestDataSource, truncateAll } from './db';
@@ -14,6 +16,7 @@ import { getTestDataSource, truncateAll } from './db';
 let moduleRef: TestingModule;
 let generator: BillGeneratorService;
 let billsService: BillsService;
+let payments: PaymentsService;
 let ds: DataSource;
 
 beforeAll(async () => {
@@ -22,6 +25,7 @@ beforeAll(async () => {
   await moduleRef.init();
   generator = moduleRef.get(BillGeneratorService);
   billsService = moduleRef.get(BillsService);
+  payments = moduleRef.get(PaymentsService);
   ds = await getTestDataSource();
 });
 
@@ -162,6 +166,46 @@ describe('rewriteForBill', () => {
     });
     expect(survivor).not.toBeNull();
     expect(survivor?.status).toBe('PAID');
+  });
+
+  it('keeps a fully reversed instance and its payment_logs history through a rewrite', async () => {
+    // Spec §5.4 amendment: a fully reversed payment returns an instance to
+    // amount_paid = 0, status = 'UNPAID', is_customized = false — every
+    // REWRITABLE clause is satisfied even though the instance has history.
+    // Without the extra NOT EXISTS guard on step 1's DELETE, a later
+    // template edit that moves the occurrence set off this date would
+    // delete the row and cascade-delete its two payment_logs rows with it.
+    const bill = await seedBill({ frequency: 'MONTHLY', startDate: '2026-01-10' });
+    await generator.materializeForBill(bill);
+    // Must land off the ANNUALLY target set (just the 01-10 anniversary),
+    // or the rewrite would merely UPDATE it, not reach the DELETE branch
+    // this test is pinning.
+    const future = (await instancesOf(bill))
+      .filter((r) => r.dueDate > T())
+      .find((r) => !r.dueDate.endsWith('-01-10'));
+    if (!future) throw new Error('fixture expected a future monthly row off the 01-10 pattern');
+
+    const { payment } = await payments.record(bill.userId, future.id, { amount: 100 });
+    await payments.reverse(bill.userId, future.id, payment.id);
+
+    const beforeRewrite = await ds.getRepository(BillInstance).findOneByOrFail({ id: future.id });
+    expect(beforeRewrite).toMatchObject({ status: 'UNPAID', amountPaid: 0, isCustomized: false });
+    const logsBefore = await ds.getRepository(PaymentLog).find({
+      where: { billInstanceId: future.id },
+    });
+    expect(logsBefore).toHaveLength(2);
+
+    // Switching to ANNUALLY moves the occurrence set off most monthly
+    // dates, including (in general) this one — the exact scenario that
+    // used to delete the row.
+    await update(bill, { frequency: 'ANNUALLY' });
+
+    const survivor = await ds.getRepository(BillInstance).findOneBy({ id: future.id });
+    expect(survivor).not.toBeNull();
+    const logsAfter = await ds.getRepository(PaymentLog).find({
+      where: { billInstanceId: future.id },
+    });
+    expect(logsAfter).toHaveLength(2);
   });
 
   it('removes future rewritable instances when the bill is deactivated', async () => {
