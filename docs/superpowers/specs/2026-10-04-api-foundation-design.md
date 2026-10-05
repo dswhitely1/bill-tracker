@@ -309,15 +309,38 @@ logs the user out of a working session. This is ordinary behavior for a
 single-page application, not an attack.
 
 Resolution: a rotated token remains redeemable for a **30-second grace
-window**, during which it returns its existing successor rather than
-minting another. Concretely, when a revoked token is presented:
+window**. When a revoked token is presented:
 
-1. If `replaced_by` is set, the successor is still active, and
-   `revoked_at` is within 30 seconds, return the successor's access
-   token and re-send the successor cookie. This is a benign double
-   request.
-2. Otherwise — no successor, successor already revoked, or outside the
-   window — treat it as replay and revoke the user's entire chain.
+1. If `revoked_at` is **outside** the window, treat it as replay and
+   revoke the user's entire chain.
+2. Inside the window, walk `replaced_by` **forward to the newest link in
+   the chain**, and rotate that link if it is still live.
+3. Inside the window with no live link — the chain ends revoked — reject
+   the request with 401 but do **not** revoke the chain. That is a logout
+   race, not a theft signal.
+
+**Following the chain to its tip, rather than checking only the immediate
+successor, is required.** A single hop tolerates exactly two concurrent
+refreshes. With three — an ordinary dashboard loading three resources that
+all return 401 — the first rotates `T`→`A`, the second graces to `A` and
+issues `B`, and the third still points at `A`, which is now revoked. It
+would fall through to chain revocation and log the user out: precisely the
+false positive this mechanism exists to prevent, one request later. The
+walk is bounded (16 hops) so corrupt data cannot loop.
+
+**Revocation is checked before expiry.** A token that is both expired and
+revoked must still trigger replay handling. Checking expiry first would
+return a bland "expired" and discard the theft signal — and because every
+rotation issues a fresh `expires_at`, a chain outlives any single stolen
+token, so an attacker who sits on a stolen token past its expiry would
+escape detection entirely.
+
+**Rotation is serialized.** The read-check-write runs in one transaction
+holding a `SELECT ... FOR UPDATE` lock on the presented row. Without it,
+two genuinely simultaneous requests can both observe the token as live and
+both rotate it, issuing two successors and orphaning one. The grace window
+handles requests that arrive sequentially; the lock handles those that
+arrive at the same instant.
 
 The window is deliberately short. A stolen token is valuable for days;
 confining the ambiguity to 30 seconds preserves the security property
@@ -498,6 +521,12 @@ concentrate:
 - an expired refresh token returns 401
 - two concurrent refreshes with the same cookie both succeed, and the
   user is not logged out
+- **three** concurrent refreshes with the same cookie all succeed, and the
+  user is not logged out — the single-hop version of this design fails here
+- a revoked token with no live successor, presented inside the window,
+  returns 401 without revoking the chain (logout race)
+- a token that is both expired and revoked triggers replay handling, not
+  an expiry error
 - a revoked token presented outside the 30-second grace window revokes
   the chain
 - a controller without `@Public()` rejects an anonymous request, proving

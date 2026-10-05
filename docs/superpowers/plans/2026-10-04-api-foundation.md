@@ -1880,6 +1880,7 @@ import { afterAll, beforeEach, describe, expect, it } from 'vitest';
 import { Test } from '@nestjs/testing';
 import { ConfigModule } from '@nestjs/config';
 import { JwtModule } from '@nestjs/jwt';
+import { verify } from 'jsonwebtoken';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import type { DataSource } from 'typeorm';
 import { TokenService, REFRESH_GRACE_MS } from '../src/auth/token.service';
@@ -1959,17 +1960,111 @@ describe('TokenService.rotate', () => {
   });
 
   // --- Review Focus item 1 ---
-  it('lets two concurrent refreshes with the same cookie both succeed', async () => {
+  it('lets two refreshes with the same cookie both succeed, leaving exactly one live token',
+    async () => {
+      const first = await tokens.issueRefreshToken(userId);
+
+      const a = await tokens.rotate(first.token);
+      const b = await tokens.rotate(first.token); // the racing second request
+
+      expect(a.accessToken).toBeTruthy();
+      expect(b.accessToken).toBeTruthy();
+
+      // Exactly one, not "more than zero": an orphaned extra live token is the
+      // signature of an unsynchronized rotate, and `toBeGreaterThan(0)` hides it.
+      const live = await ds.query(`SELECT 1 FROM refresh_tokens WHERE revoked_at IS NULL`);
+      expect(live).toHaveLength(1);
+
+      // The token actually handed back must work — "some row is live" is not the
+      // same claim as "the user still has a session".
+      await expect(tokens.rotate(b.refreshToken)).resolves.toBeTruthy();
+    });
+
+  it('lets THREE refreshes with the same cookie all succeed', async () => {
     const first = await tokens.issueRefreshToken(userId);
 
     const a = await tokens.rotate(first.token);
-    const b = await tokens.rotate(first.token); // the racing second request
+    const b = await tokens.rotate(first.token);
+    const c = await tokens.rotate(first.token); // single-hop grace fails here
 
     expect(a.accessToken).toBeTruthy();
     expect(b.accessToken).toBeTruthy();
+    expect(c.accessToken).toBeTruthy();
 
     const live = await ds.query(`SELECT 1 FROM refresh_tokens WHERE revoked_at IS NULL`);
-    expect(live.length).toBeGreaterThan(0); // the user is NOT logged out
+    expect(live).toHaveLength(1);
+    await expect(tokens.rotate(c.refreshToken)).resolves.toBeTruthy();
+  });
+
+  it('rejects a revoked token with no live successor without killing the chain', async () => {
+    const first = await tokens.issueRefreshToken(userId);
+    const other = await tokens.issueRefreshToken(userId); // a session on another device
+    await tokens.revoke(first.token); // logout, so no successor exists
+
+    await expect(tokens.rotate(first.token)).rejects.toThrow(/Invalid refresh token/i);
+
+    // A logout race must not sign the user out everywhere else.
+    const live = await ds.query(`SELECT 1 FROM refresh_tokens WHERE revoked_at IS NULL`);
+    expect(live).toHaveLength(1);
+    await expect(tokens.rotate(other.token)).resolves.toBeTruthy();
+  });
+
+  it('treats a token that is both expired and revoked as replay, not expiry', async () => {
+    const first = await tokens.issueRefreshToken(userId);
+    await tokens.rotate(first.token);
+    await ds.query(
+      `UPDATE refresh_tokens
+       SET revoked_at = now() - interval '1 hour', expires_at = now() - interval '1 day'`,
+    );
+
+    // Expiry must not exempt a revoked token from the theft signal.
+    await expect(tokens.rotate(first.token)).rejects.toThrow(/reuse detected/i);
+  });
+
+  it('still graces a refresh at 29 seconds and refuses at 31', async () => {
+    const first = await tokens.issueRefreshToken(userId);
+    await tokens.rotate(first.token);
+    await ds.query(
+      `UPDATE refresh_tokens SET revoked_at = now() - interval '29 seconds'
+       WHERE revoked_at IS NOT NULL`,
+    );
+    await expect(tokens.rotate(first.token)).resolves.toBeTruthy();
+
+    const second = await tokens.issueRefreshToken(userId);
+    await tokens.rotate(second.token);
+    await ds.query(
+      `UPDATE refresh_tokens SET revoked_at = now() - interval '31 seconds'
+       WHERE revoked_at IS NOT NULL`,
+    );
+    await expect(tokens.rotate(second.token)).rejects.toThrow(/reuse detected/i);
+  });
+
+  it('revoke() marks the token revoked so it can no longer be rotated', async () => {
+    const first = await tokens.issueRefreshToken(userId);
+    await tokens.revoke(first.token);
+
+    const rows = await ds.query(`SELECT revoked_at FROM refresh_tokens`);
+    expect(rows[0].revoked_at).not.toBeNull();
+    await expect(tokens.rotate(first.token)).rejects.toThrow(/Invalid refresh token/i);
+  });
+
+  it('signs access tokens with the configured secret and TTL', async () => {
+    const user = { id: userId, email: 'tok@test.dev' };
+    const raw = tokens.issueAccessToken(user);
+
+    // Verify with the secret from config, not the one the test module registered —
+    // otherwise dropping the explicit secret in issueAccessToken would go unnoticed.
+    const decoded = verify(raw, process.env.JWT_ACCESS_SECRET as string) as {
+      sub: string;
+      email: string;
+      iat: number;
+      exp: number;
+    };
+
+    expect(decoded.sub).toBe(userId);
+    expect(decoded.email).toBe('tok@test.dev');
+    // .env.test sets JWT_ACCESS_TTL=1s
+    expect(decoded.exp - decoded.iat).toBe(1);
   });
 
   it('revokes the whole chain when a token is replayed after the grace window', async () => {
@@ -2025,7 +2120,7 @@ import { Injectable, UnauthorizedException } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { JwtService } from '@nestjs/jwt';
 import { InjectRepository } from '@nestjs/typeorm';
-import { IsNull, Repository } from 'typeorm';
+import { EntityManager, IsNull, Repository } from 'typeorm';
 import { createHash, randomBytes } from 'node:crypto';
 import { RefreshToken } from './refresh-token.entity';
 import { UsersService } from '../users/users.service';
@@ -2033,6 +2128,15 @@ import type { User } from '../users/user.entity';
 import type { Env } from '../config/env.schema';
 
 export const REFRESH_GRACE_MS = 30_000;
+
+/** Bound on the replaced_by walk, so corrupt data cannot loop. */
+const MAX_CHAIN_HOPS = 16;
+
+export interface RotationResult {
+  accessToken: string;
+  refreshToken: string;
+  expiresAt: Date;
+}
 
 @Injectable()
 export class TokenService {
@@ -2057,13 +2161,16 @@ export class TokenService {
     );
   }
 
-  async issueRefreshToken(userId: string): Promise<{ token: string; expiresAt: Date }> {
+  async issueRefreshToken(
+    userId: string,
+    repo: Repository<RefreshToken> = this.tokens,
+  ): Promise<{ token: string; expiresAt: Date; id: string }> {
     const token = randomBytes(32).toString('base64url');
     const days = this.config.get('REFRESH_TTL_DAYS', { infer: true });
     const expiresAt = new Date(Date.now() + days * 24 * 60 * 60 * 1000);
 
-    await this.tokens.save(
-      this.tokens.create({
+    const saved = await repo.save(
+      repo.create({
         userId,
         tokenHash: this.hash(token),
         expiresAt,
@@ -2072,52 +2179,87 @@ export class TokenService {
       }),
     );
 
-    return { token, expiresAt };
+    // Return the id rather than re-querying by hash. A re-query that came back
+    // null would commit the predecessor with replaced_by = null, turning an
+    // impossible condition into a silent chain-kill on the next refresh.
+    return { token, expiresAt, id: saved.id };
   }
 
-  async rotate(presented: string) {
-    if (!presented || typeof presented !== 'string') {
-      throw new UnauthorizedException('Invalid refresh token');
-    }
+  async rotate(presented: string): Promise<RotationResult> {
+    if (!presented) throw new UnauthorizedException('Invalid refresh token');
 
-    const row = await this.tokens.findOne({ where: { tokenHash: this.hash(presented) } });
-    if (!row) throw new UnauthorizedException('Invalid refresh token');
-    if (row.expiresAt.getTime() <= Date.now()) {
-      throw new UnauthorizedException('Refresh token expired');
-    }
+    // One transaction with a row lock on the presented token. Without it, two
+    // simultaneous requests can both see the token as live and both rotate it,
+    // issuing two successors and orphaning one.
+    return this.tokens.manager.transaction(async (manager) => {
+      const repo = manager.getRepository(RefreshToken);
 
-    if (row.revokedAt) {
-      const successor = row.replacedBy
-        ? await this.tokens.findOne({ where: { id: row.replacedBy } })
-        : null;
-      const withinGrace = Date.now() - row.revokedAt.getTime() <= REFRESH_GRACE_MS;
+      const row = await repo.findOne({
+        where: { tokenHash: this.hash(presented) },
+        lock: { mode: 'pessimistic_write' },
+      });
+      if (!row) throw new UnauthorizedException('Invalid refresh token');
 
-      if (withinGrace && successor && !successor.revokedAt) {
-        // A benign double refresh from one browser: both requests carried the same
-        // cookie because neither response had landed yet. Rotate the successor and
-        // let the newer Set-Cookie win in the shared cookie jar.
-        return this.rotateRow(successor);
+      // Revocation is checked BEFORE expiry. Presenting a revoked token is the
+      // theft signal, and an expired one must not be exempt from it — every
+      // rotation issues a fresh expiry, so a chain outlives any single stolen
+      // token, and an attacker who waited out the expiry would escape detection.
+      if (row.revokedAt) {
+        const withinGrace = Date.now() - row.revokedAt.getTime() <= REFRESH_GRACE_MS;
+        if (!withinGrace) {
+          await this.revokeAllForUser(row.userId, manager);
+          throw new UnauthorizedException('Refresh token reuse detected');
+        }
+
+        const tip = await this.liveChainTip(row, repo);
+        if (!tip) {
+          // Revoked inside the window with no live successor: a logout race,
+          // not a replay. Reject without killing the user's other devices.
+          throw new UnauthorizedException('Invalid refresh token');
+        }
+        return this.rotateRow(tip, repo);
       }
 
-      await this.revokeAllForUser(row.userId);
-      throw new UnauthorizedException('Refresh token reuse detected');
-    }
+      if (row.expiresAt.getTime() <= Date.now()) {
+        throw new UnauthorizedException('Refresh token expired');
+      }
 
-    return this.rotateRow(row);
+      return this.rotateRow(row, repo);
+    });
   }
 
-  private async rotateRow(row: RefreshToken) {
+  /**
+   * Walks `replaced_by` forward to the newest link and returns it if it is
+   * still live. Following only the immediate successor would tolerate exactly
+   * two concurrent refreshes and log the user out on the third.
+   */
+  private async liveChainTip(
+    start: RefreshToken,
+    repo: Repository<RefreshToken>,
+  ): Promise<RefreshToken | null> {
+    let current = start;
+    for (let hops = 0; hops < MAX_CHAIN_HOPS; hops += 1) {
+      if (!current.revokedAt) return current;
+      if (!current.replacedBy) return null;
+      const next = await repo.findOne({ where: { id: current.replacedBy } });
+      if (!next) return null;
+      current = next;
+    }
+    return null; // bounded: corrupt data cannot loop forever
+  }
+
+  private async rotateRow(
+    row: RefreshToken,
+    repo: Repository<RefreshToken>,
+  ): Promise<RotationResult> {
     const user = await this.users.findById(row.userId);
     if (!user) throw new UnauthorizedException('Invalid refresh token');
 
-    const next = await this.issueRefreshToken(row.userId);
-    const nextRow = await this.tokens.findOne({
-      where: { tokenHash: this.hash(next.token) },
-    });
+    const next = await this.issueRefreshToken(row.userId, repo);
 
     row.revokedAt = new Date();
-    row.replacedBy = nextRow?.id ?? null;
-    await this.tokens.save(row);
+    row.replacedBy = next.id; // carried through from save(), never re-queried
+    await repo.save(row);
 
     return {
       accessToken: this.issueAccessToken(user),
@@ -2134,8 +2276,9 @@ export class TokenService {
     );
   }
 
-  async revokeAllForUser(userId: string): Promise<void> {
-    await this.tokens.update({ userId, revokedAt: IsNull() }, { revokedAt: new Date() });
+  async revokeAllForUser(userId: string, manager?: EntityManager): Promise<void> {
+    const repo = manager ? manager.getRepository(RefreshToken) : this.tokens;
+    await repo.update({ userId, revokedAt: IsNull() }, { revokedAt: new Date() });
   }
 }
 ```
