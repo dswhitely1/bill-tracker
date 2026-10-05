@@ -11,7 +11,12 @@ import { UpdateBillInstanceDto } from './dto/update-bill-instance.dto';
 import { paymentState } from './payment-state';
 import { addDays, compare } from './dates';
 
-/** The bounded range is this endpoint's pagination; there is no cursor. */
+/**
+ * The bounded range is this endpoint's pagination; there is no cursor.
+ * Measured as `to - from`, inclusive of both endpoints, so `from=X&to=X+400`
+ * (a 401-day inclusive span) is accepted — "at most 400 days" in the spec
+ * means this difference, not a day count.
+ */
 const MAX_RANGE_DAYS = 400;
 
 @Injectable()
@@ -26,7 +31,7 @@ export class BillInstancesService {
       throw new BadRequestException('to must not be earlier than from');
     }
     if (compare(query.to, addDays(query.from, MAX_RANGE_DAYS)) > 0) {
-      throw new BadRequestException(`the range must not exceed ${MAX_RANGE_DAYS} days`);
+      throw new BadRequestException(`to - from must not exceed ${MAX_RANGE_DAYS} days`);
     }
 
     const today = this.generator.today();
