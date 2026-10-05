@@ -194,7 +194,11 @@ export class TokenService {
     };
   }
 
-  async revoke(presented: string): Promise<void> {
+  async revoke(presented: unknown): Promise<void> {
+    // cookie-parser JSON-decodes a "j:"-prefixed cookie value, so this can
+    // genuinely arrive as an object (or any other JSON type), not just a
+    // missing/empty string. `unknown` documents that; a `string` parameter
+    // would make this guard look like dead code to a reader.
     if (!presented || typeof presented !== 'string') return;
     await this.tokens.update(
       { tokenHash: this.hash(presented), revokedAt: IsNull() },

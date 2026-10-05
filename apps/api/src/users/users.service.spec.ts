@@ -72,10 +72,13 @@ describe('UsersService', () => {
     await expect(service.verifyAgainstDummyHash('anything')).resolves.toBeUndefined();
 
     // A no-op body would satisfy "resolves" but defeat the whole mechanism,
-    // so assert the comparison actually happened against a real cost-12 digest.
+    // so assert the comparison actually happened against a real digest
+    // hashed at the CONFIGURED cost (10 here) — proving derivation from
+    // `this.cost`, not a cost-12 literal that would drift from an operator's
+    // BCRYPT_COST and reopen the timing oracle.
     expect(compareMock).toHaveBeenCalledTimes(1);
     const [plain, hash] = compareMock.mock.calls[0];
     expect(plain).toBe('anything');
-    expect(hash).toMatch(/^\$2[aby]\$12\$/);
+    expect(hash).toMatch(/^\$2[aby]\$10\$/);
   });
 });

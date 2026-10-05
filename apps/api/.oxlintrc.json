@@ -3,6 +3,6 @@
   "plugins": ["vitest"],
   "rules": {
     "no-unused-vars": ["error", { "ignoreRestSiblings": true }],
-    "vitest/expect-expect": ["error", { "assertFunctionNames": ["expect", "expectTypeOf", "assert", "assertType", "**.expect"] }]
+    "vitest/expect-expect": ["error", { "assertFunctionNames": ["expect", "expectTypeOf", "assert", "assertType", "request.**.expect"] }]
   }
 }

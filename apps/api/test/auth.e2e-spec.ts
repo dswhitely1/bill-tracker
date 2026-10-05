@@ -1,6 +1,6 @@
-import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { Test } from '@nestjs/testing';
-import { INestApplication, ValidationPipe } from '@nestjs/common';
+import { INestApplication, Logger, ValidationPipe } from '@nestjs/common';
 import cookieParser from 'cookie-parser';
 import request from 'supertest';
 import type { DataSource } from 'typeorm';
@@ -11,6 +11,7 @@ import { getTestDataSource, truncateAll } from './db';
 
 let app: INestApplication;
 let ds: DataSource;
+let logError: ReturnType<typeof vi.spyOn>;
 
 const creds = { email: 'don@example.com', name: 'Don', password: 'hunter22' };
 
@@ -26,7 +27,17 @@ beforeAll(async () => {
   ds = await getTestDataSource();
 });
 
-beforeEach(async () => { await truncateAll(ds); });
+beforeEach(async () => {
+  await truncateAll(ds);
+  // The rollback test below deliberately drives a 500, which the exception
+  // filter logs server-side via Logger.error. Silence it here (Task 5's
+  // pattern) and assert it fired, rather than letting it spam stdout.
+  logError = vi.spyOn(Logger.prototype, 'error').mockImplementation(() => undefined);
+});
+
+afterEach(() => {
+  vi.restoreAllMocks();
+});
 
 afterAll(async () => {
   await app?.close();
@@ -48,6 +59,10 @@ describe('POST /api/auth/register', () => {
     expect(cookie).toBeDefined();
     expect(cookie).toContain('HttpOnly');
     expect(cookie).toContain('SameSite=Lax');
+    // Path scopes the cookie's CSRF surface; if it were '/' every route would
+    // carry it and this test would still have passed.
+    expect(cookie).toContain('Path=/api/auth');
+    expect(cookie).not.toContain('Secure'); // production-only
   });
 
   it('seeds exactly the four default categories', async () => {
@@ -72,6 +87,9 @@ describe('POST /api/auth/register', () => {
     expect(users).toHaveLength(0); // no half-created account survives
     expect(cats).toHaveLength(0);
 
+    // The 500 must still be logged server-side, not silently swallowed.
+    expect(logError).toHaveBeenCalledTimes(1);
+
     seed.mockRestore();
   });
 
@@ -79,6 +97,7 @@ describe('POST /api/auth/register', () => {
     await request(app.getHttpServer()).post('/api/auth/register').send(creds).expect(201);
     const res = await request(app.getHttpServer()).post('/api/auth/register').send(creds).expect(409);
     expect(JSON.stringify(res.body)).not.toContain('UQ_users_email');
+    expect(JSON.stringify(res.body)).not.toContain(creds.email);
   });
 
   // --- Review Focus item 3 ---
@@ -124,8 +143,11 @@ describe('POST /api/auth/login', () => {
     const unknownEmail = await request(app.getHttpServer())
       .post('/api/auth/login').send({ email: 'nobody@example.com', password: 'nope-nope' }).expect(401);
 
-    expect(wrongPassword.body.message).toBe(unknownEmail.body.message);
-    expect(wrongPassword.body.statusCode).toBe(unknownEmail.body.statusCode);
+    // Compare the WHOLE body minus timestamp, not two hand-picked fields. The
+    // filter emits { statusCode, error, message, path, timestamp }; checking
+    // only message and statusCode would miss a future field that discriminates.
+    const strip = ({ timestamp, ...rest }: Record<string, unknown>) => rest;
+    expect(strip(wrongPassword.body)).toEqual(strip(unknownEmail.body));
   });
 });
 
@@ -147,15 +169,55 @@ describe('POST /api/auth/refresh', () => {
 });
 
 describe('global guard', () => {
+  // Assert against logout, not /api/users/me. That route does not exist until
+  // Task 9, so a [401, 404] assertion against it passes with the guard DELETED
+  // — and so does the health check. Logout is protected and exists now, so
+  // these two are the only tests here that can actually fail.
   it('rejects an unauthenticated request to a protected route', async () => {
-    // /api/users/me does not exist until Task 9 adds UsersController, so an
-    // unmatched route 404s before the guard ever runs. Once that route
-    // exists this must tighten to .expect(401) only.
-    const res = await request(app.getHttpServer()).get('/api/users/me');
-    expect([401, 404]).toContain(res.status);
+    await request(app.getHttpServer()).post('/api/auth/logout').expect(401);
+  });
+
+  it('accepts a bearer token on a protected route', async () => {
+    const reg = await request(app.getHttpServer())
+      .post('/api/auth/register').send(creds).expect(201);
+
+    // The only place a bearer token is presented to a route. Without this,
+    // JwtStrategy's secret lookup, extraction and validate() are never
+    // exercised end to end and a wrong config key stays green.
+    await request(app.getHttpServer())
+      .post('/api/auth/logout')
+      .set('Authorization', `Bearer ${reg.body.accessToken}`)
+      .expect(204);
+  });
+
+  it('rejects a bearer token signed with the wrong secret', async () => {
+    const forged = [
+      Buffer.from(JSON.stringify({ alg: 'HS256', typ: 'JWT' })).toString('base64url'),
+      Buffer.from(JSON.stringify({ sub: 'x', email: 'a@b.co' })).toString('base64url'),
+      'not-a-real-signature',
+    ].join('.');
+
+    await request(app.getHttpServer())
+      .post('/api/auth/logout')
+      .set('Authorization', `Bearer ${forged}`)
+      .expect(401);
   });
 
   it('allows the public health route', async () => {
     await request(app.getHttpServer()).get('/api/health').expect(200);
+  });
+
+  it('tolerates a malformed logout cookie without a 500', async () => {
+    const reg = await request(app.getHttpServer())
+      .post('/api/auth/register').send(creds).expect(201);
+
+    // cookie-parser JSON-parses values prefixed "j:", so this arrives as an
+    // object. Without the typeof guard in TokenService.revoke it reaches
+    // createHash().update(object) and surfaces as a 500.
+    await request(app.getHttpServer())
+      .post('/api/auth/logout')
+      .set('Authorization', `Bearer ${reg.body.accessToken}`)
+      .set('Cookie', 'refresh_token=j:{"a":1}')
+      .expect(204);
   });
 });

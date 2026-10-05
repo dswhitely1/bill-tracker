@@ -7,11 +7,17 @@ import { User } from './user.entity';
 import type { Env } from '../config/env.schema';
 import { assertPasswordPolicy, normalizeEmail } from './password.policy';
 
-/** A real bcrypt hash of a value nothing can match. Used to equalize login timing. */
-const DUMMY_HASH = '$2b$12$C6UzMDM.H6dfI/f/IKcEeO3Ym6xCBOgN0Eq9dPuxjVYlWBBbLvQ6W';
-
 @Injectable()
 export class UsersService {
+  /**
+   * Lazily derived from the configured cost and cached, rather than pinned
+   * as a literal. BCRYPT_COST is operator-configurable (10-15); a literal
+   * hashed at a fixed cost would make the dummy-hash comparison measurably
+   * faster or slower than a real one whenever the operator's cost differs
+   * from the literal's, reintroducing the timing oracle this exists to close.
+   */
+  private dummyHash: string | null = null;
+
   constructor(
     @InjectRepository(User) private readonly users: Repository<User>,
     private readonly config: ConfigService<Env, true>,
@@ -50,7 +56,8 @@ export class UsersService {
 
   /** Burns the same time a real comparison would, so a missing user is indistinguishable. */
   async verifyAgainstDummyHash(plain: string): Promise<void> {
-    await bcrypt.compare(plain, DUMMY_HASH);
+    this.dummyHash ??= await bcrypt.hash('no-user-matches-this-value', this.cost);
+    await bcrypt.compare(plain, this.dummyHash);
   }
 
   async updateProfile(
