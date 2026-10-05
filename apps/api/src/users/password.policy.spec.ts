@@ -11,7 +11,9 @@ describe('assertPasswordPolicy', () => {
   });
 
   it('rejects a password over 72 BYTES even when its character count is legal', () => {
-    // 25 four-byte emoji = 100 bytes, but only 25 JS code points.
+    // 25 emoji: 100 bytes in UTF-8, but .length is 50 (UTF-16 surrogate pairs).
+    // Both measures sit on opposite sides of the 72 threshold, which is what
+    // makes this test able to distinguish byteLength from length.
     const emojiPassword = '\u{1F512}'.repeat(25);
     expect(emojiPassword.length).toBeLessThan(72);
     expect(Buffer.byteLength(emojiPassword, 'utf8')).toBeGreaterThan(72);

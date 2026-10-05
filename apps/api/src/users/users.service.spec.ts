@@ -1,5 +1,11 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+import * as bcrypt from 'bcrypt';
 import { UsersService } from './users.service';
+
+vi.mock('bcrypt', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('bcrypt')>();
+  return { ...actual, compare: vi.fn<typeof actual.compare>(actual.compare) };
+});
 
 const config = { get: (k: string) => (k === 'BCRYPT_COST' ? 10 : undefined) };
 
@@ -49,12 +55,27 @@ describe('UsersService', () => {
   });
 
   it('rejects an over-byte password before bcrypt can truncate it', async () => {
-    const save = vi.fn<() => void>();
+    const save = vi.fn<(u: unknown) => unknown>();
     const service = serviceWith({ findOne, save, create: (u: unknown) => u });
 
     await expect(
       service.createUser({ email: 'a@b.co', name: 'D', password: '\u{1F512}'.repeat(25) }),
     ).rejects.toThrow(/72 bytes/);
     expect(save).not.toHaveBeenCalled();
+  });
+
+  it('burns a real bcrypt comparison when the user does not exist', async () => {
+    const compareMock = bcrypt.compare as unknown as ReturnType<typeof vi.fn>;
+    compareMock.mockClear();
+    const service = serviceWith({ findOne });
+
+    await expect(service.verifyAgainstDummyHash('anything')).resolves.toBeUndefined();
+
+    // A no-op body would satisfy "resolves" but defeat the whole mechanism,
+    // so assert the comparison actually happened against a real cost-12 digest.
+    expect(compareMock).toHaveBeenCalledTimes(1);
+    const [plain, hash] = compareMock.mock.calls[0];
+    expect(plain).toBe('anything');
+    expect(hash).toMatch(/^\$2[aby]\$12\$/);
   });
 });
