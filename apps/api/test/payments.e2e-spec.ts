@@ -134,6 +134,33 @@ describe('POST /api/bill-instances/:id/payments', () => {
     expect(res.body.payment.note).toBe('cheque');
   });
 
+  it('rejects an ISO 8601 basic-format paidAt instead of 500ing', async () => {
+    // validator.js's isISO8601 accepts basic format (no separators) in
+    // every option mode, but `new Date('20261005')` is Invalid Date, which
+    // used to reach pg as "0NaN-NaN-NaNT..." and 500.
+    const { token } = await setup('a@example.com');
+    const instance = await firstInstance(token);
+    await request(app.getHttpServer())
+      .post(`/api/bill-instances/${instance.id}/payments`).set(auth(token))
+      .send({ amount: 10, paidAt: '20261005' }).expect(400);
+  });
+
+  it('rejects a calendar date that does not exist', async () => {
+    const { token } = await setup('a@example.com');
+    const instance = await firstInstance(token);
+    await request(app.getHttpServer())
+      .post(`/api/bill-instances/${instance.id}/payments`).set(auth(token))
+      .send({ amount: 10, paidAt: '2026-02-31' }).expect(400);
+  });
+
+  it('rejects a paidAt in the future', async () => {
+    const { token } = await setup('a@example.com');
+    const instance = await firstInstance(token);
+    await request(app.getHttpServer())
+      .post(`/api/bill-instances/${instance.id}/payments`).set(auth(token))
+      .send({ amount: 10, paidAt: '2099-01-01T00:00:00.000Z' }).expect(400);
+  });
+
   it('rejects overpayment, naming the balance', async () => {
     const { token } = await setup('a@example.com');
     const instance = await firstInstance(token);

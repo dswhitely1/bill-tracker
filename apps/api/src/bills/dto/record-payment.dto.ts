@@ -1,6 +1,7 @@
-import { IsISO8601, IsNumber, IsOptional, IsString, Max, MaxLength } from 'class-validator';
+import { IsNumber, IsOptional, IsString, Max, MaxLength } from 'class-validator';
 import { Transform } from 'class-transformer';
 import type { RecordPaymentRequest } from '@bill-tracker/shared-types';
+import { IsIsoTimestamp } from '../../common/validators/is-iso-timestamp.validator';
 
 const MAX_AMOUNT = 9999999999.99;
 
@@ -15,7 +16,7 @@ export class RecordPaymentDto implements RecordPaymentRequest {
   amount?: number;
 
   @IsOptional()
-  @IsISO8601()
+  @IsIsoTimestamp()
   paidAt?: string;
 
   @IsOptional()
