@@ -200,8 +200,11 @@ can be reversed at most once, independent of any service check.
 
 ### Type decisions carried forward
 
-- Money is `numeric(12,2)` with the same explicit TypeORM numeric
-  transformer to `number` used in sub-project 1. Never floating point.
+- Money is `numeric(12,2)` with an explicit TypeORM `ValueTransformer`
+  to `number`, **introduced here** — sub-project 1 had no money columns,
+  so no such transformer exists yet. Without it `node-postgres` returns
+  every amount as a string and it reaches the client as `"142.00"`.
+  Never floating point.
 - **`date` columns are `string` in TypeScript**, in `YYYY-MM-DD` form,
   end to end — entity, DTO, response. They are never converted to
   `Date`. A `Date` carries an instant and a timezone; a due date is a
