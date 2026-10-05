@@ -1716,7 +1716,9 @@ describe('UsersService', () => {
     expect(compareMock).toHaveBeenCalledTimes(1);
     const [plain, hash] = compareMock.mock.calls[0];
     expect(plain).toBe('anything');
-    expect(hash).toMatch(/^\$2[aby]\$12\$/);
+    // Generated at the CONFIGURED cost, not a pinned literal — .env.test sets
+    // BCRYPT_COST=10, so a hardcoded cost-12 hash would fail here.
+    expect(hash).toMatch(/^\$2[aby]\$10\$/);
   });
 
   it('rejects an over-byte password before bcrypt can truncate it', async () => {
@@ -1753,8 +1755,14 @@ import { User } from './user.entity';
 import type { Env } from '../config/env.schema';
 import { assertPasswordPolicy, normalizeEmail } from './password.policy';
 
-/** A real bcrypt hash of a value nothing can match. Used to equalize login timing. */
-const DUMMY_HASH = '$2b$12$C6UzMDM.H6dfI/f/IKcEeO3Ym6xCBOgN0Eq9dPuxjVYlWBBbLvQ6W';
+/**
+ * A real bcrypt hash of a value nothing can match, used to equalise login
+ * timing. It must be generated at the CONFIGURED cost: a literal pinned at
+ * cost 12 while an operator runs BCRYPT_COST=14 makes the unknown-email path
+ * measurably faster than the wrong-password path, which is the timing oracle
+ * this mechanism exists to remove. Computed once, lazily, and cached.
+ */
+let dummyHash: string | null = null;
 
 @Injectable()
 export class UsersService {
@@ -1796,7 +1804,8 @@ export class UsersService {
 
   /** Burns the same time a real comparison would, so a missing user is indistinguishable. */
   async verifyAgainstDummyHash(plain: string): Promise<void> {
-    await bcrypt.compare(plain, DUMMY_HASH);
+    dummyHash ??= await bcrypt.hash('no-user-matches-this-value', this.cost);
+    await bcrypt.compare(plain, dummyHash);
   }
 
   async updateProfile(
@@ -2468,6 +2477,10 @@ describe('POST /api/auth/register', () => {
     expect(cookie).toBeDefined();
     expect(cookie).toContain('HttpOnly');
     expect(cookie).toContain('SameSite=Lax');
+    // Path scopes the cookie's CSRF surface; if it were '/' every route would
+    // carry it and this test would still have passed.
+    expect(cookie).toContain('Path=/api/auth');
+    expect(cookie).not.toContain('Secure'); // production-only
   });
 
   it('seeds exactly the four default categories', async () => {
@@ -2499,6 +2512,7 @@ describe('POST /api/auth/register', () => {
     await request(app.getHttpServer()).post('/api/auth/register').send(creds).expect(201);
     const res = await request(app.getHttpServer()).post('/api/auth/register').send(creds).expect(409);
     expect(JSON.stringify(res.body)).not.toContain('UQ_users_email');
+    expect(JSON.stringify(res.body)).not.toContain(creds.email);
   });
 
   // --- Review Focus item 3 ---
@@ -2544,8 +2558,11 @@ describe('POST /api/auth/login', () => {
     const unknownEmail = await request(app.getHttpServer())
       .post('/api/auth/login').send({ email: 'nobody@example.com', password: 'nope-nope' }).expect(401);
 
-    expect(wrongPassword.body.message).toBe(unknownEmail.body.message);
-    expect(wrongPassword.body.statusCode).toBe(unknownEmail.body.statusCode);
+    // Compare the WHOLE body minus timestamp, not two hand-picked fields. The
+    // filter emits { statusCode, error, message, path, timestamp }; checking
+    // only message and statusCode would miss a future field that discriminates.
+    const strip = ({ timestamp, ...rest }: Record<string, unknown>) => rest;
+    expect(strip(wrongPassword.body)).toEqual(strip(unknownEmail.body));
   });
 });
 
@@ -2567,12 +2584,56 @@ describe('POST /api/auth/refresh', () => {
 });
 
 describe('global guard', () => {
+  // Assert against logout, not /api/users/me. That route does not exist until
+  // Task 9, so a [401, 404] assertion against it passes with the guard DELETED
+  // — and so does the health check. Logout is protected and exists now, so
+  // these two are the only tests here that can actually fail.
   it('rejects an unauthenticated request to a protected route', async () => {
-    await request(app.getHttpServer()).get('/api/users/me').expect(401);
+    await request(app.getHttpServer()).post('/api/auth/logout').expect(401);
+  });
+
+  it('accepts a bearer token on a protected route', async () => {
+    const reg = await request(app.getHttpServer())
+      .post('/api/auth/register').send(creds).expect(201);
+
+    // The only place a bearer token is presented to a route. Without this,
+    // JwtStrategy's secret lookup, extraction and validate() are never
+    // exercised end to end and a wrong config key stays green.
+    await request(app.getHttpServer())
+      .post('/api/auth/logout')
+      .set('Authorization', `Bearer ${reg.body.accessToken}`)
+      .expect(204);
+  });
+
+  it('rejects a bearer token signed with the wrong secret', async () => {
+    const forged = [
+      Buffer.from(JSON.stringify({ alg: 'HS256', typ: 'JWT' })).toString('base64url'),
+      Buffer.from(JSON.stringify({ sub: 'x', email: 'a@b.co' })).toString('base64url'),
+      'not-a-real-signature',
+    ].join('.');
+
+    await request(app.getHttpServer())
+      .post('/api/auth/logout')
+      .set('Authorization', `Bearer ${forged}`)
+      .expect(401);
   });
 
   it('allows the public health route', async () => {
     await request(app.getHttpServer()).get('/api/health').expect(200);
+  });
+
+  it('tolerates a malformed logout cookie without a 500', async () => {
+    const reg = await request(app.getHttpServer())
+      .post('/api/auth/register').send(creds).expect(201);
+
+    // cookie-parser JSON-parses values prefixed "j:", so this arrives as an
+    // object. Without the typeof guard in TokenService.revoke it reaches
+    // createHash().update(object) and surfaces as a 500.
+    await request(app.getHttpServer())
+      .post('/api/auth/logout')
+      .set('Authorization', `Bearer ${reg.body.accessToken}`)
+      .set('Cookie', 'refresh_token=j:{"a":1}')
+      .expect(204);
   });
 });
 ```
@@ -2930,6 +2991,12 @@ import { Module } from '@nestjs/common';
 @Module({})
 export class CategoriesModule {}
 ```
+
+**oxlint note.** `vitest/expect-expect` does not recognise supertest's chained
+`.expect(status)` as an assertion, so `apps/api/.oxlintrc.json` must list it.
+Scope the exemption to the supertest chain (`"request.**.expect"`), not a bare
+`"**.expect"` — the broad form exempts any member call ending in `.expect`,
+which would silence the rule on genuine assertion-free tests.
 
 - [ ] **Step 9: Run the tests to verify they pass**
 
