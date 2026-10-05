@@ -101,9 +101,12 @@ describe('BillGeneratorService.materializeForBill', () => {
     expect(await generator.materializeForBill(bill)).toBe(0);
   });
 
-  it('survives two concurrent generations of the same bill', async () => {
-    // The UNIQUE constraint plus ON CONFLICT DO NOTHING is the whole
-    // mechanism; two API processes running the nightly job must not collide.
+  it('re-inserting an existing occurrence set is a no-op even when two generations overlap', async () => {
+    // This proves ON CONFLICT DO NOTHING prevents duplicate-key errors on
+    // re-insertion — it would pass identically under full serialization, so
+    // it does not by itself demonstrate real concurrent overlap. The
+    // genuine concurrency guarantee (two transactions actually interleaved
+    // on one instance) is proven in payments.int-spec.ts.
     const bill = await seedBill();
     const results = await Promise.all([
       generator.materializeForBill(bill),

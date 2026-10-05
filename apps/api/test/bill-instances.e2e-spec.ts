@@ -74,8 +74,11 @@ async function setup(email: string, overrides: Record<string, unknown> = {}) {
 /**
  * A window guaranteed to straddle the generator's materialized set no
  * matter when the suite runs: 60 days back covers the floor occurrence
- * for every supported frequency, 300 days forward stays comfortably
- * inside the 400-day cap while covering most of the 12-month horizon.
+ * for a MONTHLY bill (the only frequency this file uses); widen it
+ * before introducing an ANNUALLY or WEEKLY fixture into a relative
+ * window — an ANNUALLY bill's floor occurrence can be up to ~364 days
+ * back. 300 days forward stays comfortably inside the 400-day cap
+ * while covering most of the 12-month horizon.
  */
 const WINDOW_FROM = () => addDays(today, -60);
 const WINDOW_TO = () => addDays(today, 300);
