@@ -46,6 +46,9 @@ export class UsersController {
     @Body() dto: ChangePasswordDto,
   ): Promise<void> {
     await this.users.changePassword(userId, dto.currentPassword, dto.newPassword);
+    // The one legitimate non-transactional caller of revokeAllForUser: this
+    // runs outside any transaction, so the default (non-transactional)
+    // repository is correct here, not a forgotten argument.
     await this.tokens.revokeAllForUser(userId);
   }
 }

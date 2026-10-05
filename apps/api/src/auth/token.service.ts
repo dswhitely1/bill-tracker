@@ -51,9 +51,24 @@ export class TokenService {
     );
   }
 
-  async issueRefreshToken(
+  /**
+   * The non-transactional entry point: no `repo` parameter to forget, so it
+   * can never silently draw a second pool connection from inside someone
+   * else's transaction. Internal transactional callers (rotateRow) must go
+   * through the private `issueRefreshTokenWithRepo` below and pass their
+   * own manager's repository explicitly — there is no default to fall back
+   * to, which is the point: a forgotten argument there used to silently
+   * reintroduce the self-deadlock class this branch already hit once, where
+   * an in-transaction call drew a second pool connection while holding row
+   * locks.
+   */
+  async issueRefreshToken(userId: string): Promise<{ token: string; expiresAt: Date; id: string }> {
+    return this.issueRefreshTokenWithRepo(userId, this.tokens);
+  }
+
+  private async issueRefreshTokenWithRepo(
     userId: string,
-    repo: Repository<RefreshToken> = this.tokens,
+    repo: Repository<RefreshToken>,
   ): Promise<{ token: string; expiresAt: Date; id: string }> {
     const token = randomBytes(32).toString('base64url');
     const days = this.config.get('REFRESH_TTL_DAYS', { infer: true });
@@ -178,7 +193,7 @@ export class TokenService {
     const user = await manager.getRepository(User).findOne({ where: { id: row.userId } });
     if (!user) return { ok: false, message: 'Invalid refresh token' };
 
-    const next = await this.issueRefreshToken(row.userId, repo);
+    const next = await this.issueRefreshTokenWithRepo(row.userId, repo);
 
     row.revokedAt = new Date();
     row.replacedBy = next.id; // carried through from save(), never re-queried
@@ -206,6 +221,13 @@ export class TokenService {
     );
   }
 
+  /**
+   * `manager` stays optional here, unlike issueRefreshToken's split above:
+   * this has exactly one legitimate non-transactional caller
+   * (UsersController.changePassword, outside any transaction — see the
+   * comment at that call site) alongside its two in-transaction callers
+   * inside rotate(), which always pass their manager explicitly.
+   */
   async revokeAllForUser(userId: string, manager?: EntityManager): Promise<void> {
     const repo = manager ? manager.getRepository(RefreshToken) : this.tokens;
     await repo.update({ userId, revokedAt: IsNull() }, { revokedAt: new Date() });
