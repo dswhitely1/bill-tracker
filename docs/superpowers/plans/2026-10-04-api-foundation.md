@@ -1574,7 +1574,9 @@ describe('assertPasswordPolicy', () => {
   });
 
   it('rejects a password over 72 BYTES even when its character count is legal', () => {
-    // 25 four-byte emoji = 100 bytes, but only 25 JS code points.
+    // 25 emoji: 100 bytes in UTF-8, but .length is 50 (UTF-16 surrogate pairs).
+    // Both measures sit on opposite sides of the 72 threshold, which is what
+    // makes this test able to distinguish byteLength from length.
     const emojiPassword = '\u{1F512}'.repeat(25);
     expect(emojiPassword.length).toBeLessThan(72);
     expect(Buffer.byteLength(emojiPassword, 'utf8')).toBeGreaterThan(72);
@@ -1645,6 +1647,7 @@ Create `apps/api/src/users/users.service.spec.ts`:
 
 ```ts
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+import * as bcrypt from 'bcrypt';
 import { UsersService } from './users.service';
 
 const config = { get: (k: string) => (k === 'BCRYPT_COST' ? 10 : undefined) };
@@ -1690,6 +1693,22 @@ describe('UsersService', () => {
 
     await expect(service.verifyPassword('hunter22', user.passwordHash)).resolves.toBe(true);
     await expect(service.verifyPassword('wrong-one', user.passwordHash)).resolves.toBe(false);
+  });
+
+  it('burns a real bcrypt comparison when the user does not exist', async () => {
+    const compareSpy = vi.spyOn(bcrypt, 'compare');
+    const service = serviceWith({ findOne });
+
+    await expect(service.verifyAgainstDummyHash('anything')).resolves.toBeUndefined();
+
+    // A no-op body would satisfy "resolves" but defeat the whole mechanism,
+    // so assert the comparison actually happened against a real cost-12 digest.
+    expect(compareSpy).toHaveBeenCalledTimes(1);
+    const [plain, hash] = compareSpy.mock.calls[0];
+    expect(plain).toBe('anything');
+    expect(hash).toMatch(/^\$2[aby]\$12\$/);
+
+    compareSpy.mockRestore();
   });
 
   it('rejects an over-byte password before bcrypt can truncate it', async () => {
