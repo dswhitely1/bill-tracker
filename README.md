@@ -196,8 +196,9 @@ category owned by the same user, `400` otherwise.
 | GET | `/api/bill-instances/:id/payments` | oldest first |
 
 `GET /api/bill-instances` requires `from` and `to`, both `YYYY-MM-DD`,
-with `to >= from` and a span of at most 400 days — the bounded range is
-the pagination; there is no cursor. Optional filters:
+with `to >= from` and `to - from <= 400` days — the bounded range is
+the pagination; there is no cursor. Concretely, `from=X&to=X+400` is
+the widest accepted span. Optional filters:
 `status=UNPAID|PARTIALLY_PAID|PAID`, `overdue=true|false` (`false`
 means `status = 'PAID' OR due_date >= today`), `billId=<uuid>`. Ordered
 by `due_date`, then `id`.
@@ -205,7 +206,10 @@ by `due_date`, then `id`.
 `PATCH` accepts `amount` and `note` only — `dueDate` is not editable
 (move the occurrence by editing the template instead). `amount` must
 stay `> 0` and `>= amountPaid`. Any successful `PATCH` sets
-`isCustomized = true` and recomputes `status`.
+`isCustomized = true` and recomputes `status` — **including an empty
+`PATCH {}`**, which changes nothing else but still permanently opts
+that occurrence out of future template rewrites (spec §5.4). Clients
+should not send empty PATCHes.
 
 ### Payments
 
@@ -228,9 +232,12 @@ Two different ways to stop a bill, with very different blast radii:
   of its materialized instances, and their entire payment history.
   There is no undo.
 - **`PATCH /api/bills/:id { "isActive": false }`** stops future
-  instance generation but keeps every record — past instances, their
-  statuses, and every payment ever logged against them stay exactly as
-  they are.
+  instance generation and removes future instances that are unpaid,
+  carry no payments, and are uncustomized. Everything else survives
+  untouched: past (already-due) instances, anything paid or partially
+  paid, anything customized, and any instance with payment history at
+  all — including one that was paid and then fully reversed back to
+  `UNPAID`/`0`, since reversing a payment does not erase its log rows.
 
 Reach for `PATCH { isActive: false }` whenever the bill merely ended
 (a subscription cancelled, a loan paid off) and the history should
