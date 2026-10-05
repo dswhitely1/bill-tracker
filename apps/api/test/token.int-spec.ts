@@ -251,8 +251,11 @@ describe('TokenService.rotate', () => {
 
     expect(decoded.sub).toBe(userId);
     expect(decoded.email).toBe('tok@test.dev');
-    // .env.test sets JWT_ACCESS_TTL=1s
-    expect(decoded.exp - decoded.iat).toBe(1);
+    // .env.test sets JWT_ACCESS_TTL=15m. Stays a derived-number assertion
+    // (not a hardcoded literal copied from the config) so a dropped
+    // `expiresIn` — which would leave `exp` undefined — still fails this
+    // via NaN rather than coincidentally matching a magic number.
+    expect(decoded.exp - decoded.iat).toBe(15 * 60);
   });
 
   it('revokes the whole chain when a token is replayed after the grace window', async () => {

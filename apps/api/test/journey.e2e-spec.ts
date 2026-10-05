@@ -4,15 +4,39 @@ import { INestApplication, ValidationPipe } from '@nestjs/common';
 import cookieParser from 'cookie-parser';
 import request from 'supertest';
 import type { DataSource } from 'typeorm';
-import { AppModule } from '../src/app/app.module';
 import { AllExceptionsFilter } from '../src/common/filters/all-exceptions.filter';
 import { getTestDataSource, truncateAll } from './db';
 
 let app: INestApplication;
 let ds: DataSource;
+let previousTtl: string | undefined;
 
 beforeAll(async () => {
+  // This spec is the one place that needs a genuine, unmocked access-token
+  // expiry. .env.test now sets JWT_ACCESS_TTL=15m for the other 56 specs
+  // (a 1s TTL applied suite-wide was flaky under load — see the Task 11 fix
+  // report), so override it here for this file only.
+  //
+  // A plain `process.env.JWT_ACCESS_TTL = '1s'` here is NOT enough: Vitest's
+  // collection phase statically imports every spec file up front (so it can
+  // enumerate test names before running any of them), and that import graph
+  // reaches `app.module.ts` -> `config.module.ts`, whose `@Module()`
+  // decorator calls `NestConfigModule.forRoot(...)` -- and THAT call runs
+  // synchronously, once, at that import, reading process.env at that moment.
+  // Every later `Test.createTestingModule({ imports: [AppModule] })` across
+  // every file reuses that one frozen snapshot, so a static top-level
+  // `import { AppModule }` plus a later env mutation in `beforeAll` changes
+  // process.env too late to matter (confirmed by instrumentation: the TTL
+  // actually used stayed at 15m even though process.env read back '1s').
+  // `vi.resetModules()` plus a dynamic re-import forces `app.module.ts` (and
+  // `config.module.ts` beneath it) to re-evaluate from scratch, with the env
+  // var we just set, giving this file its own correctly-read 1s TTL without
+  // touching any other spec file's already-bound imports.
+  previousTtl = process.env.JWT_ACCESS_TTL;
+  process.env.JWT_ACCESS_TTL = '1s'; // must be set BEFORE the re-import below
   process.env.ENV_FILE = '.env.test';
+  vi.resetModules();
+  const { AppModule } = await import('../src/app/app.module');
   const moduleRef = await Test.createTestingModule({ imports: [AppModule] }).compile();
   app = moduleRef.createNestApplication();
   app.setGlobalPrefix('api');
@@ -32,6 +56,8 @@ afterEach(() => {
 });
 
 afterAll(async () => {
+  if (previousTtl === undefined) delete process.env.JWT_ACCESS_TTL;
+  else process.env.JWT_ACCESS_TTL = previousTtl;
   await app?.close();
   if (ds?.isInitialized) await ds.destroy();
 });
@@ -59,7 +85,7 @@ describe('full token lifecycle', () => {
     await request(server).get('/api/users/me')
       .set('Authorization', `Bearer ${firstAccess}`).expect(200);
 
-    // 3. JWT_ACCESS_TTL is 1s in .env.test, so this is a real expiry, not a mock.
+    // 3. This file's beforeAll rebuilt the app with JWT_ACCESS_TTL=1s, so this is a real expiry, not a mock.
     await sleep(1500);
     await request(server).get('/api/users/me')
       .set('Authorization', `Bearer ${firstAccess}`).expect(401);
