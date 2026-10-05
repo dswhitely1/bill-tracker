@@ -1,12 +1,13 @@
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { Test } from '@nestjs/testing';
-import { INestApplication, Logger, ValidationPipe } from '@nestjs/common';
-import cookieParser from 'cookie-parser';
+import { INestApplication, Logger } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
 import request from 'supertest';
 import type { DataSource } from 'typeorm';
 import { AppModule } from '../src/app/app.module';
 import { AuthService } from '../src/auth/auth.service';
-import { AllExceptionsFilter } from '../src/common/filters/all-exceptions.filter';
+import { configureApp } from '../src/app/configure-app';
+import type { Env } from '../src/config/env.schema';
 import { getTestDataSource, truncateAll } from './db';
 
 let app: INestApplication;
@@ -19,10 +20,7 @@ beforeAll(async () => {
   process.env.ENV_FILE = '.env.test';
   const moduleRef = await Test.createTestingModule({ imports: [AppModule] }).compile();
   app = moduleRef.createNestApplication();
-  app.setGlobalPrefix('api');
-  app.use(cookieParser());
-  app.useGlobalPipes(new ValidationPipe({ whitelist: true, transform: true }));
-  app.useGlobalFilters(new AllExceptionsFilter());
+  configureApp(app, app.get(ConfigService<Env, true>));
   await app.init();
   ds = await getTestDataSource();
 });
@@ -205,6 +203,30 @@ describe('global guard', () => {
 
   it('allows the public health route', async () => {
     await request(app.getHttpServer()).get('/api/health').expect(200);
+  });
+
+  // configureApp() wires CORS from WEB_ORIGIN (http://localhost:4200 in
+  // .env.test). This is the only test that actually exercises it — the
+  // CORS allowlist is the only thing standing between a hostile origin and
+  // a credentialed browser request, and it used to live only in main.ts,
+  // which no test executed.
+  it('grants the configured WEB_ORIGIN access with credentials', async () => {
+    const res = await request(app.getHttpServer())
+      .get('/api/health')
+      .set('Origin', 'http://localhost:4200')
+      .expect(200);
+
+    expect(res.headers['access-control-allow-origin']).toBe('http://localhost:4200');
+    expect(res.headers['access-control-allow-credentials']).toBe('true');
+  });
+
+  it('does not grant a different origin access', async () => {
+    const res = await request(app.getHttpServer())
+      .get('/api/health')
+      .set('Origin', 'http://evil.example')
+      .expect(200);
+
+    expect(res.headers['access-control-allow-origin']).not.toBe('http://evil.example');
   });
 
   it('tolerates a malformed logout cookie without a 500', async () => {
