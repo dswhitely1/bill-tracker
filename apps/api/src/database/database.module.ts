@@ -17,6 +17,10 @@ import { Category } from '../categories/category.entity';
         entities: [User, RefreshToken, Category],
         synchronize: false,
         migrationsRun: false,
+        // Without this, a connection checkout the pool can't satisfy hangs
+        // forever with no log and no error — the worst failure mode a
+        // server has. Pool sizing (`max`) is left at its default.
+        extra: { connectionTimeoutMillis: 5000 },
       }),
     }),
   ],

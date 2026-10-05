@@ -28,4 +28,8 @@ export const AppDataSource = new DataSource({
   logging: false,
   entities: [User, RefreshToken, Category],
   migrations: [InitialSchema1759536000000],
+  // Without this, a connection checkout the pool can't satisfy hangs
+  // forever with no log and no error. Pool sizing (`max`) is left at its
+  // default.
+  extra: { connectionTimeoutMillis: 5000 },
 });
