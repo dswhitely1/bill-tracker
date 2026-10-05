@@ -5,7 +5,7 @@ import { JwtModule } from '@nestjs/jwt';
 import { verify } from 'jsonwebtoken';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import type { DataSource } from 'typeorm';
-import { TokenService, REFRESH_GRACE_MS } from '../src/auth/token.service';
+import { TokenService, REFRESH_GRACE_MS, RotationResult } from '../src/auth/token.service';
 
 // MAX_CHAIN_HOPS is private to the service; 16 is its value, and the loop below
 // needs to exceed it. If the bound changes, this must change with it.
@@ -221,9 +221,19 @@ describe('TokenService.rotate', () => {
       tokens.rotate(first.token),
     ]);
 
-    expect(results.some((r) => r.status === 'fulfilled')).toBe(true);
+    // Both contending callers must get a working session — tolerating one
+    // rejection here would still leave exactly one live row and pass green
+    // even if contention started rejecting a caller outright.
+    expect(results.every((r) => r.status === 'fulfilled')).toBe(true);
     const live = await ds.query(`SELECT 1 FROM refresh_tokens WHERE revoked_at IS NULL`);
     expect(live).toHaveLength(1);
+
+    // Prove both returned tokens are actually live sessions, not just that
+    // "some row is live" — rotate each one forward and expect it to work.
+    // The `every` above already guarantees both settled as fulfilled.
+    const fulfilled = results as PromiseFulfilledResult<RotationResult>[];
+    await expect(tokens.rotate(fulfilled[0].value.refreshToken)).resolves.toBeTruthy();
+    await expect(tokens.rotate(fulfilled[1].value.refreshToken)).resolves.toBeTruthy();
   });
 
   it('signs access tokens with the configured secret and TTL', async () => {

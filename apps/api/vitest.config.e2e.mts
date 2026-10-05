@@ -21,6 +21,11 @@ export default defineConfig({
     setupFiles: ['./test/setup-env.ts'],
     hookTimeout: 30_000,
     testTimeout: 30_000,
-    poolOptions: { threads: { singleThread: true } },
+    // Multiple spec files share one Postgres test database and truncate its
+    // tables in their own beforeEach hooks. Running files in parallel lets
+    // one file's truncate/insert race another's assertions. `poolOptions`
+    // was removed in Vitest 4 (options are now top-level); this is its
+    // replacement for serializing file execution.
+    fileParallelism: false,
   },
 });

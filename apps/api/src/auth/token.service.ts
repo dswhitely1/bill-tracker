@@ -195,7 +195,7 @@ export class TokenService {
   }
 
   async revoke(presented: string): Promise<void> {
-    if (!presented) return;
+    if (!presented || typeof presented !== 'string') return;
     await this.tokens.update(
       { tokenHash: this.hash(presented), revokedAt: IsNull() },
       { revokedAt: new Date() },
