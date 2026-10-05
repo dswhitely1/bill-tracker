@@ -13,6 +13,20 @@ export const envSchema = z.object({
   REFRESH_TTL_DAYS: z.coerce.number().int().positive().default(30),
   BCRYPT_COST: z.coerce.number().int().min(10).max(15).default(12),
   WEB_ORIGIN: z.url(),
+  APP_TIMEZONE: z
+    .string()
+    .default('UTC')
+    .refine(
+      (tz) => {
+        try {
+          new Intl.DateTimeFormat('en-CA', { timeZone: tz });
+          return true;
+        } catch {
+          return false;
+        }
+      },
+      { message: 'must be a valid IANA timezone name, for example America/New_York' },
+    ),
 });
 
 export type Env = z.infer<typeof envSchema>;

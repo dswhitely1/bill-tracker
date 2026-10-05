@@ -49,3 +49,21 @@ describe('validateEnv', () => {
     expect(message).not.toMatch(/changeme|secret123|default/i);
   });
 });
+
+describe('APP_TIMEZONE', () => {
+  it('defaults to UTC', () => {
+    expect(validateEnv({ ...valid }).APP_TIMEZONE).toBe('UTC');
+  });
+
+  it('accepts a real IANA zone', () => {
+    expect(validateEnv({ ...valid, APP_TIMEZONE: 'America/New_York' }).APP_TIMEZONE).toBe(
+      'America/New_York',
+    );
+  });
+
+  it('rejects a zone Intl does not recognise, at boot', () => {
+    expect(() => validateEnv({ ...valid, APP_TIMEZONE: 'Mars/Olympus_Mons' })).toThrow(
+      /APP_TIMEZONE/,
+    );
+  });
+});
