@@ -34,4 +34,24 @@ describe('safeReturnUrl', () => {
     expect(safeReturnUrl(['/bills'], '/upcoming')).toBe('/upcoming');
     expect(safeReturnUrl('', '/upcoming')).toBe('/upcoming');
   });
+
+  it.each([
+    ['/\t/evil.example', 'a tab'],
+    ['/\n/evil.example', 'a newline'],
+    ['/\r/evil.example', 'a carriage return'],
+  ])('rejects %j, where %s splits a protocol-relative URL', (value) => {
+    // URL parsing removes the control character, so the browser resolves
+    // this to //evil.example even though it does not start with "//".
+    expect(safeReturnUrl(value, '/upcoming')).toBe('/upcoming');
+  });
+
+  it('rejects an absolute URL hidden behind leading whitespace', () => {
+    expect(safeReturnUrl('  https://evil.example', '/upcoming')).toBe('/upcoming');
+  });
+
+  it('returns the normalised path, not the raw input', () => {
+    // Whatever is returned is what gets navigated to, so it must be the
+    // same string that was validated.
+    expect(safeReturnUrl('/bi\tlls', '/upcoming')).toBe('/bills');
+  });
 });

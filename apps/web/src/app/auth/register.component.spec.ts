@@ -62,6 +62,9 @@ describe('RegisterComponent', () => {
     expect(fixture.componentInstance.form.controls.password.errors).toMatchObject({
       maxBytes: expect.anything(),
     });
+
+    fixture.componentInstance.submit();
+    expect(http.match('/api/auth/register')).toHaveLength(0);
   });
 
   it('registers and signs the session in', async () => {

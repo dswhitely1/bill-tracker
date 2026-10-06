@@ -12,7 +12,16 @@
  */
 export function safeReturnUrl(value: unknown, fallback: string): string {
   if (typeof value !== 'string' || value === '') return fallback;
-  if (!value.startsWith('/')) return fallback;
-  if (value.startsWith('//') || value.startsWith('/\\')) return fallback;
-  return value;
+
+  // URL parsing strips tab, LF and CR from anywhere in a URL and trims
+  // leading C0 controls and spaces, so "/\t/evil.example" is parsed as
+  // "//evil.example" — a protocol-relative URL that the prefix checks
+  // below would otherwise have let through. Normalise to the string a
+  // browser would actually resolve, validate that, and return that:
+  // validating one string and returning another is its own bypass.
+  const url = value.replace(/[\t\n\r]/g, '').replace(/^[ - ]+/, '');
+
+  if (url === '' || !url.startsWith('/')) return fallback;
+  if (url.startsWith('//') || url.startsWith('/\\')) return fallback;
+  return url;
 }
