@@ -100,15 +100,47 @@ export class SessionService {
     const generation = ++this.refreshGeneration;
     const shared = this.authApi.refresh().pipe(
       map((response) => response.accessToken),
-      tap((accessToken) => this.token.set(accessToken)),
+      tap((accessToken) => {
+        // The refresh request is never cancelled (refCount: false), so it
+        // can outlive the session that started it. Writing this token now
+        // would leave a signed-out session holding a live credential.
+        if (this.refreshGeneration !== generation) {
+          throw new Error('Refresh superseded by a newer session');
+        }
+        this.token.set(accessToken);
+      }),
       finalize(() => {
         if (this.refreshGeneration === generation) this.inFlightRefresh = null;
       }),
+      // No `scheduler` and no `windowTime`: either would introduce an
+      // async boundary between the source emitting and subscribers
+      // receiving it, which breaks the single-flight contract callers
+      // rely on — concurrent callers must see the same emission, not a
+      // deferred replay of it.
       shareReplay({ bufferSize: 1, refCount: false }),
     );
 
     this.inFlightRefresh = shared;
     return shared;
+  }
+
+  /**
+   * Performs the sign-out half of a failed refresh — once per refresh
+   * cycle, and only while that cycle still belongs to the current session.
+   *
+   * Every waiter on the shared observable reaches the interceptor's
+   * failure branch, so this must be idempotent. `clear()` nulls
+   * `inFlightRefresh`, so the first caller's identity check succeeds and
+   * every later one fails. A cycle that was superseded by `clear()` or
+   * `signIn()` is no longer the in-flight one either, so a refresh that
+   * outlived its session cannot sign out the session that replaced it.
+   *
+   * Returns whether it acted, so the caller knows whether to navigate.
+   */
+  failRefresh(cycle: Observable<string>): boolean {
+    if (this.inFlightRefresh !== cycle) return false;
+    this.clear();
+    return true;
   }
 
   async signOut(): Promise<void> {

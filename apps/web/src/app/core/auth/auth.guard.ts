@@ -3,9 +3,17 @@ import { CanActivateFn, Router } from '@angular/router';
 import { SessionService } from './session.service';
 
 /**
- * Both guards read the session synchronously, which is only safe because
- * `SessionService.restore()` runs in an app initializer and has already
- * settled before any route activates — spec §6.2.
+ * Both guards read the session synchronously. That is safe not because of
+ * provider order — order is irrelevant in an `EnvironmentInjector` — but
+ * because `restore()` runs as an `APP_INITIALIZER`, which
+ * `ApplicationInitStatus.donePromise` awaits before bootstrap completes,
+ * while the router's initial navigation runs afterwards, from an
+ * `APP_BOOTSTRAP_LISTENER`. `restore()` has therefore always settled
+ * before any guard runs.
+ *
+ * `withEnabledBlockingInitialNavigation()` would not help and would not be
+ * safe to add casually: it registers its own `APP_INITIALIZER`, which
+ * would race this one rather than wait for it.
  */
 export const authGuard: CanActivateFn = (_route, state) => {
   const session = inject(SessionService);

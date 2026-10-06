@@ -162,6 +162,31 @@ describe('refresh', () => {
 
     expect(errors).toHaveLength(2);
   });
+
+  it('does not let a settled refresh clear a newer one started after a sign-out', () => {
+    session.signIn({ accessToken: 'token-1', user: profile });
+    const first = session.refresh();
+    first.subscribe({ error: () => undefined });
+    const a = http.expectOne('/api/auth/refresh');
+
+    session.clear();
+    session.signIn({ accessToken: 'token-2', user: profile });
+
+    const second = session.refresh();
+    second.subscribe({ error: () => undefined });
+    const b = http.expectOne('/api/auth/refresh');
+    expect(second).not.toBe(first);
+
+    a.flush({ accessToken: 'stale' });
+
+    // The superseded cycle must not null the live one, and its token must
+    // not reach the session that replaced it.
+    expect(session.refresh()).toBe(second);
+    expect(session.accessToken()).toBe('token-2');
+
+    b.flush({ accessToken: 'token-3' });
+    expect(session.accessToken()).toBe('token-3');
+  });
 });
 
 describe('clear and signOut', () => {

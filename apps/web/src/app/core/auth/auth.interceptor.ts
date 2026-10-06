@@ -48,7 +48,7 @@ function withAuth(request: HttpRequest<unknown>, token: string | null): HttpRequ
  * the retry would sign the user out.
  */
 export const authInterceptor: HttpInterceptorFn = (request, next) => {
-  if (!request.url.startsWith(API_BASE)) return next(request);
+  if (request.url !== API_BASE && !request.url.startsWith(`${API_BASE}/`)) return next(request);
 
   const session = inject(SessionService);
   const router = inject(Router);
@@ -64,14 +64,10 @@ export const authInterceptor: HttpInterceptorFn = (request, next) => {
         return throwError(() => error);
       }
 
-      return session.refresh().pipe(
+      const refresh$ = session.refresh();
+      return refresh$.pipe(
         catchError((refreshError: unknown) => {
-          // Every waiter on the shared refresh observable lands here, so
-          // the first one to arrive does the work and the rest see a
-          // session that is already cleared. A genuinely later failure,
-          // after a new sign-in, navigates again.
-          if (session.isAuthenticated()) {
-            session.clear();
+          if (session.failRefresh(refresh$)) {
             void router.navigate(['/login'], { queryParams: { reason: 'expired' } });
           }
           return throwError(() => refreshError);
