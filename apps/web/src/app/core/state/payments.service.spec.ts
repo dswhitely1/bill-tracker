@@ -102,6 +102,12 @@ describe('record', () => {
 
 describe('reverse', () => {
   it('posts to the nested path and patches the row', async () => {
+    // Put the store in a state the response will visibly change. Flushing
+    // an instance identical to the seeded one proves nothing: the
+    // assertion would pass even if patch() were never called.
+    instances.patch({ ...instance, status: 'PAID', amountPaid: 1200 });
+    expect(instances.instances()[0].status).toBe('PAID');
+
     const done = payments.reverse('inst-1', 'pay-1');
     const req = http.expectOne('/api/bill-instances/inst-1/payments/pay-1/reverse');
     expect(req.request.method).toBe('POST');
@@ -112,6 +118,7 @@ describe('reverse', () => {
     await done;
 
     expect(instances.instances()[0].status).toBe('UNPAID');
+    expect(instances.instances()[0].amountPaid).toBe(0);
   });
 
   it('rejects a second reversal with the server message intact', async () => {
@@ -130,6 +137,11 @@ describe('reverse', () => {
 
 describe('unpay', () => {
   it('patches the row from a bare instance, not a result pair', async () => {
+    // Same reasoning as the reverse test above: seed a state the bare
+    // instance response will visibly overwrite.
+    instances.patch({ ...instance, status: 'PAID', amountPaid: 1200 });
+    expect(instances.instances()[0].status).toBe('PAID');
+
     const done = payments.unpay('inst-1');
     const req = http.expectOne('/api/bill-instances/inst-1/unpay');
     expect(req.request.method).toBe('POST');
@@ -146,9 +158,10 @@ describe('history and reload', () => {
     const done = payments.history('inst-1');
     const req = http.expectOne('/api/bill-instances/inst-1/payments');
     expect(req.request.method).toBe('GET');
-    req.flush([payment]);
+    const older = { ...payment, id: 'pay-0', paidAt: '2026-09-01T12:00:00.000Z' };
+    req.flush([older, payment]);
 
-    expect(await done).toEqual([payment]);
+    expect((await done).map((p) => p.id)).toEqual(['pay-0', 'pay-1']);
   });
 
   it('reloads one instance and patches it in, for recovering from a conflict', async () => {

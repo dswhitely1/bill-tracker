@@ -324,4 +324,28 @@ describe('payment actions', () => {
 
     expect(http.match('/api/bill-instances/inst-1/payments')).toHaveLength(0);
   });
+
+  it('clears payments and patches the row from the bare instance response', async () => {
+    const partiallyPaid = { ...base, status: 'PARTIALLY_PAID' as const, amountPaid: 500 };
+    const fixture = TestBed.createComponent(UpcomingComponent);
+    dialogReturning(fixture, 'confirm');
+    await fixture.whenStable();
+    instancesRequest().flush([partiallyPaid]);
+    await fixture.whenStable();
+    await fixture.whenStable();
+
+    const done = fixture.componentInstance.confirmUnpay(partiallyPaid);
+    // Same hop as openPayment above: the confirm dialog's afterClosed()
+    // settles before confirmUnpay reaches the HTTP call.
+    await fixture.whenStable();
+    const req = http.expectOne('/api/bill-instances/inst-1/unpay');
+    expect(req.request.method).toBe('POST');
+    req.flush({ ...base, status: 'UNPAID', amountPaid: 0 });
+    await done;
+    await fixture.whenStable();
+    await fixture.whenStable();
+
+    expect(fixture.nativeElement.textContent).toContain('Unpaid');
+    expect(fixture.nativeElement.textContent).not.toContain('paid of');
+  });
 });
