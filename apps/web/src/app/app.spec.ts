@@ -53,3 +53,25 @@ describe('routing', () => {
     expect(fixture.nativeElement.textContent).toContain('Create an account');
   });
 });
+
+describe('the guarded area', () => {
+  it('sends an anonymous visitor to the login screen', async () => {
+    const router = TestBed.inject(Router);
+    const fixture = TestBed.createComponent(App);
+
+    await router.navigateByUrl('/categories');
+    await fixture.whenStable();
+
+    expect(router.url).toContain('/login');
+  });
+
+  it('carries the attempted path so they land where they were going', async () => {
+    const router = TestBed.inject(Router);
+    const fixture = TestBed.createComponent(App);
+
+    await router.navigateByUrl('/categories');
+    await fixture.whenStable();
+
+    expect(decodeURIComponent(router.url)).toContain('returnUrl=/categories');
+  });
+});

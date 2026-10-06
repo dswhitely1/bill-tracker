@@ -27,7 +27,14 @@ export const routes: Routes = [
     path: '',
     canActivate: [authGuard],
     loadComponent: () => import('./shell/shell.component').then((m) => m.ShellComponent),
-    children: [{ path: '', pathMatch: 'full', redirectTo: 'upcoming' }],
+    children: [
+      { path: '', pathMatch: 'full', redirectTo: 'upcoming' },
+      {
+        path: 'categories',
+        loadComponent: () =>
+          import('./categories/categories.component').then((m) => m.CategoriesComponent),
+      },
+    ],
   },
   {
     path: '**',
