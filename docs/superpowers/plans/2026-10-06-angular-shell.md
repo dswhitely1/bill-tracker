@@ -760,7 +760,6 @@ import {
 } from '@angular/core';
 import { provideRouter, withComponentInputBinding } from '@angular/router';
 import { provideHttpClient, withFetch, withInterceptors } from '@angular/common/http';
-import { provideAnimationsAsync } from '@angular/platform-browser/animations/async';
 import { routes } from './app.routes';
 
 export const appConfig: ApplicationConfig = {
@@ -769,7 +768,6 @@ export const appConfig: ApplicationConfig = {
     provideZonelessChangeDetection(),
     provideRouter(routes, withComponentInputBinding()),
     provideHttpClient(withFetch(), withInterceptors([])),
-    provideAnimationsAsync(),
   ],
 };
 ```
@@ -791,7 +789,7 @@ Replace `apps/web/src/app/app.spec.ts` with:
 import { TestBed } from '@angular/core/testing';
 import { provideZonelessChangeDetection } from '@angular/core';
 import { provideRouter } from '@angular/router';
-import { provideAnimationsAsync } from '@angular/platform-browser/animations/async';
+import { MATERIAL_ANIMATIONS } from '@angular/material/core';
 import { describe, expect, it } from 'vitest';
 import { BILL_FREQUENCIES } from '@bill-tracker/shared-types';
 import { App } from './app';
@@ -803,7 +801,7 @@ describe('App', () => {
       providers: [
         provideZonelessChangeDetection(),
         provideRouter([]),
-        provideAnimationsAsync('noop'),
+        { provide: MATERIAL_ANIMATIONS, useValue: { animationsDisabled: true } },
       ],
     }).compileComponents();
 
@@ -1535,7 +1533,7 @@ import { FormControl, ReactiveFormsModule } from '@angular/forms';
 import { MatDatepickerModule } from '@angular/material/datepicker';
 import { MatFormFieldModule } from '@angular/material/form-field';
 import { MatInputModule } from '@angular/material/input';
-import { provideAnimationsAsync } from '@angular/platform-browser/animations/async';
+import { MATERIAL_ANIMATIONS } from '@angular/material/core';
 import { beforeEach, describe, expect, it } from 'vitest';
 import {
   CALENDAR_DATE_FORMATS,
@@ -1812,7 +1810,7 @@ describe('the datepicker driven by the adapter', () => {
       imports: [DatepickerHost],
       providers: [
         provideZonelessChangeDetection(),
-        provideAnimationsAsync('noop'),
+        { provide: MATERIAL_ANIMATIONS, useValue: { animationsDisabled: true } },
         ...provideCalendarDateAdapter(),
       ],
     });
@@ -2072,7 +2070,7 @@ In `apps/web/src/app/app.config.ts`, add the import:
 import { provideCalendarDateAdapter } from './core/date/calendar-date.adapter';
 ```
 
-and add to the `providers` array, after `provideAnimationsAsync()`:
+and add it as the last entry in the `providers` array:
 
 ```ts
 ...provideCalendarDateAdapter(),
@@ -4241,7 +4239,7 @@ Create `apps/web/src/app/shared/confirm-dialog.component.spec.ts`:
 import { provideZonelessChangeDetection } from '@angular/core';
 import { TestBed } from '@angular/core/testing';
 import { MAT_DIALOG_DATA, MatDialogRef } from '@angular/material/dialog';
-import { provideAnimationsAsync } from '@angular/platform-browser/animations/async';
+import { MATERIAL_ANIMATIONS } from '@angular/material/core';
 import { describe, expect, it, vi } from 'vitest';
 import { ConfirmDialogComponent, ConfirmDialogData } from './confirm-dialog.component';
 
@@ -4251,7 +4249,7 @@ function build(data: ConfirmDialogData) {
     imports: [ConfirmDialogComponent],
     providers: [
       provideZonelessChangeDetection(),
-      provideAnimationsAsync('noop'),
+      { provide: MATERIAL_ANIMATIONS, useValue: { animationsDisabled: true } },
       { provide: MAT_DIALOG_DATA, useValue: data },
       { provide: MatDialogRef, useValue: { close } },
     ],
@@ -4605,7 +4603,7 @@ import { HttpTestingController, provideHttpClientTesting } from '@angular/common
 import { provideZonelessChangeDetection } from '@angular/core';
 import { TestBed } from '@angular/core/testing';
 import { ActivatedRoute, Router, provideRouter } from '@angular/router';
-import { provideAnimationsAsync } from '@angular/platform-browser/animations/async';
+import { MATERIAL_ANIMATIONS } from '@angular/material/core';
 import { of } from 'rxjs';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { SessionService } from '../core/auth/session.service';
@@ -4632,7 +4630,7 @@ function configure(params: Record<string, unknown> = {}) {
       provideRouter([]),
       provideHttpClient(),
       provideHttpClientTesting(),
-      provideAnimationsAsync('noop'),
+      { provide: MATERIAL_ANIMATIONS, useValue: { animationsDisabled: true } },
       {
         provide: ActivatedRoute,
         useValue: { snapshot: { queryParams }, queryParams: of(queryParams) },
@@ -4944,7 +4942,7 @@ import { HttpTestingController, provideHttpClientTesting } from '@angular/common
 import { provideZonelessChangeDetection } from '@angular/core';
 import { TestBed } from '@angular/core/testing';
 import { Router, provideRouter } from '@angular/router';
-import { provideAnimationsAsync } from '@angular/platform-browser/animations/async';
+import { MATERIAL_ANIMATIONS } from '@angular/material/core';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { SessionService } from '../core/auth/session.service';
 import { RegisterComponent } from './register.component';
@@ -4968,7 +4966,7 @@ beforeEach(() => {
       provideRouter([]),
       provideHttpClient(),
       provideHttpClientTesting(),
-      provideAnimationsAsync('noop'),
+      { provide: MATERIAL_ANIMATIONS, useValue: { animationsDisabled: true } },
     ],
   });
   http = TestBed.inject(HttpTestingController);
@@ -5212,7 +5210,7 @@ import { HttpTestingController, provideHttpClientTesting } from '@angular/common
 import { provideZonelessChangeDetection } from '@angular/core';
 import { TestBed } from '@angular/core/testing';
 import { Router, provideRouter } from '@angular/router';
-import { provideAnimationsAsync } from '@angular/platform-browser/animations/async';
+import { MATERIAL_ANIMATIONS } from '@angular/material/core';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { SessionService } from '../core/auth/session.service';
 import { ShellComponent } from './shell.component';
@@ -5237,7 +5235,7 @@ beforeEach(() => {
       provideRouter([]),
       provideHttpClient(),
       provideHttpClientTesting(),
-      provideAnimationsAsync('noop'),
+      { provide: MATERIAL_ANIMATIONS, useValue: { animationsDisabled: true } },
     ],
   });
   http = TestBed.inject(HttpTestingController);
@@ -5502,7 +5500,7 @@ import { provideHttpClientTesting } from '@angular/common/http/testing';
 import { provideZonelessChangeDetection } from '@angular/core';
 import { TestBed } from '@angular/core/testing';
 import { Router, provideRouter } from '@angular/router';
-import { provideAnimationsAsync } from '@angular/platform-browser/animations/async';
+import { MATERIAL_ANIMATIONS } from '@angular/material/core';
 import { beforeEach, describe, expect, it } from 'vitest';
 import { App } from './app';
 import { routes } from './app.routes';
@@ -5515,7 +5513,7 @@ beforeEach(() => {
       provideRouter(routes),
       provideHttpClient(),
       provideHttpClientTesting(),
-      provideAnimationsAsync('noop'),
+      { provide: MATERIAL_ANIMATIONS, useValue: { animationsDisabled: true } },
     ],
   });
 });
@@ -5955,7 +5953,7 @@ import { HttpTestingController, provideHttpClientTesting } from '@angular/common
 import { provideZonelessChangeDetection } from '@angular/core';
 import { TestBed } from '@angular/core/testing';
 import { provideRouter } from '@angular/router';
-import { provideAnimationsAsync } from '@angular/platform-browser/animations/async';
+import { MATERIAL_ANIMATIONS } from '@angular/material/core';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { SessionService } from '../core/auth/session.service';
 import { CategoriesComponent } from './categories.component';
@@ -5972,7 +5970,7 @@ beforeEach(() => {
       provideRouter([]),
       provideHttpClient(),
       provideHttpClientTesting(),
-      provideAnimationsAsync('noop'),
+      { provide: MATERIAL_ANIMATIONS, useValue: { animationsDisabled: true } },
     ],
   });
   http = TestBed.inject(HttpTestingController);
@@ -6807,7 +6805,7 @@ import { HttpTestingController, provideHttpClientTesting } from '@angular/common
 import { provideZonelessChangeDetection } from '@angular/core';
 import { TestBed } from '@angular/core/testing';
 import { provideRouter } from '@angular/router';
-import { provideAnimationsAsync } from '@angular/platform-browser/animations/async';
+import { MATERIAL_ANIMATIONS } from '@angular/material/core';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { MatDialog } from '@angular/material/dialog';
 import { of } from 'rxjs';
@@ -6840,7 +6838,7 @@ beforeEach(() => {
       provideRouter([]),
       provideHttpClient(),
       provideHttpClientTesting(),
-      provideAnimationsAsync('noop'),
+      { provide: MATERIAL_ANIMATIONS, useValue: { animationsDisabled: true } },
     ],
   });
   http = TestBed.inject(HttpTestingController);
@@ -7169,7 +7167,7 @@ import { HttpTestingController, provideHttpClientTesting } from '@angular/common
 import { provideZonelessChangeDetection } from '@angular/core';
 import { TestBed } from '@angular/core/testing';
 import { ActivatedRoute, Router, provideRouter } from '@angular/router';
-import { provideAnimationsAsync } from '@angular/platform-browser/animations/async';
+import { MATERIAL_ANIMATIONS } from '@angular/material/core';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { SessionService } from '../core/auth/session.service';
 import { BillFormComponent } from './bill-form.component';
@@ -7196,7 +7194,7 @@ function configure(id: string | null) {
       provideRouter([]),
       provideHttpClient(),
       provideHttpClientTesting(),
-      provideAnimationsAsync('noop'),
+      { provide: MATERIAL_ANIMATIONS, useValue: { animationsDisabled: true } },
       { provide: ActivatedRoute, useValue: { snapshot: { paramMap: new Map([['id', id]]) } } },
     ],
   });
@@ -8167,7 +8165,7 @@ import { HttpTestingController, provideHttpClientTesting } from '@angular/common
 import { provideZonelessChangeDetection } from '@angular/core';
 import { TestBed } from '@angular/core/testing';
 import { provideRouter } from '@angular/router';
-import { provideAnimationsAsync } from '@angular/platform-browser/animations/async';
+import { MATERIAL_ANIMATIONS } from '@angular/material/core';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { SessionService } from '../core/auth/session.service';
 import { UpcomingComponent } from './upcoming.component';
@@ -8201,7 +8199,7 @@ beforeEach(() => {
       provideRouter([]),
       provideHttpClient(),
       provideHttpClientTesting(),
-      provideAnimationsAsync('noop'),
+      { provide: MATERIAL_ANIMATIONS, useValue: { animationsDisabled: true } },
     ],
   });
   http = TestBed.inject(HttpTestingController);
@@ -8976,7 +8974,7 @@ import { ComponentFixture, TestBed } from '@angular/core/testing';
 import { MatCheckboxHarness } from '@angular/material/checkbox/testing';
 import { MAT_DIALOG_DATA, MatDialogRef } from '@angular/material/dialog';
 import { MatInputHarness } from '@angular/material/input/testing';
-import { provideAnimationsAsync } from '@angular/platform-browser/animations/async';
+import { MATERIAL_ANIMATIONS } from '@angular/material/core';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { PaymentDialogComponent } from './payment-dialog.component';
 
@@ -9007,7 +9005,7 @@ beforeEach(async () => {
     imports: [PaymentDialogComponent],
     providers: [
       provideZonelessChangeDetection(),
-      provideAnimationsAsync('noop'),
+      { provide: MATERIAL_ANIMATIONS, useValue: { animationsDisabled: true } },
       { provide: MAT_DIALOG_DATA, useValue: { instance } },
       { provide: MatDialogRef, useValue: { close } },
     ],
@@ -9204,7 +9202,7 @@ import { HttpTestingController, provideHttpClientTesting } from '@angular/common
 import { provideZonelessChangeDetection } from '@angular/core';
 import { TestBed } from '@angular/core/testing';
 import { provideRouter } from '@angular/router';
-import { provideAnimationsAsync } from '@angular/platform-browser/animations/async';
+import { MATERIAL_ANIMATIONS } from '@angular/material/core';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { SessionService } from '../core/auth/session.service';
 import { PaymentHistoryComponent } from './payment-history.component';
@@ -9243,7 +9241,7 @@ beforeEach(() => {
       provideRouter([]),
       provideHttpClient(),
       provideHttpClientTesting(),
-      provideAnimationsAsync('noop'),
+      { provide: MATERIAL_ANIMATIONS, useValue: { animationsDisabled: true } },
     ],
   });
   http = TestBed.inject(HttpTestingController);
@@ -9756,7 +9754,7 @@ import { HttpTestingController, provideHttpClientTesting } from '@angular/common
 import { provideZonelessChangeDetection } from '@angular/core';
 import { TestBed } from '@angular/core/testing';
 import { Router, provideRouter } from '@angular/router';
-import { provideAnimationsAsync } from '@angular/platform-browser/animations/async';
+import { MATERIAL_ANIMATIONS } from '@angular/material/core';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { SessionService } from '../core/auth/session.service';
 import { SettingsComponent } from './settings.component';
@@ -9781,7 +9779,7 @@ beforeEach(() => {
       provideRouter([]),
       provideHttpClient(),
       provideHttpClientTesting(),
-      provideAnimationsAsync('noop'),
+      { provide: MATERIAL_ANIMATIONS, useValue: { animationsDisabled: true } },
     ],
   });
   http = TestBed.inject(HttpTestingController);
