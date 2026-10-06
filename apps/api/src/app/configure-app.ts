@@ -2,6 +2,7 @@ import { INestApplication, ValidationPipe } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import cookieParser from 'cookie-parser';
 import { AllExceptionsFilter } from '../common/filters/all-exceptions.filter';
+import { validationExceptionFactory } from '../common/validation-error.factory';
 import type { Env } from '../config/env.schema';
 
 /**
@@ -19,7 +20,12 @@ export function configureApp(app: INestApplication, config: ConfigService<Env, t
   app.use(cookieParser());
   app.enableCors({ origin: config.get('WEB_ORIGIN', { infer: true }), credentials: true });
   app.useGlobalPipes(
-    new ValidationPipe({ whitelist: true, transform: true, forbidNonWhitelisted: false }),
+    new ValidationPipe({
+      whitelist: true,
+      transform: true,
+      forbidNonWhitelisted: false,
+      exceptionFactory: validationExceptionFactory,
+    }),
   );
   app.useGlobalFilters(new AllExceptionsFilter());
 }

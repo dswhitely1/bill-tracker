@@ -127,3 +127,47 @@ describe('AllExceptionsFilter', () => {
     expect(logError).toHaveBeenCalledTimes(1);
   });
 });
+
+describe('AllExceptionsFilter and field errors', () => {
+  it('carries a field-error map through instead of discarding it', () => {
+    const { host, status, json } = hostFor('/api/bills');
+    const exception = new HttpException(
+      {
+        statusCode: 400,
+        error: 'Bad Request',
+        message: ['name should not be empty'],
+        errors: { name: ['name should not be empty'] },
+      },
+      HttpStatus.BAD_REQUEST,
+    );
+
+    new AllExceptionsFilter().catch(exception, host);
+
+    expect(status).toHaveBeenCalledWith(HttpStatus.BAD_REQUEST);
+    const body = json.mock.calls[0][0] as ErrorResponseBody & {
+      errors?: Record<string, string[]>;
+    };
+    expect(body.errors).toEqual({ name: ['name should not be empty'] });
+    expect(body.message).toEqual(['name should not be empty']);
+    expect(body.path).toBe('/api/bills');
+  });
+
+  it('omits the errors key entirely when the exception carries none', () => {
+    const { host, json } = hostFor();
+    new AllExceptionsFilter().catch(new HttpException('Nope', HttpStatus.BAD_REQUEST), host);
+
+    expect(json.mock.calls[0][0]).not.toHaveProperty('errors');
+  });
+
+  it('ignores an errors value that is not a map of string arrays', () => {
+    const { host, json } = hostFor();
+    const exception = new HttpException(
+      { statusCode: 400, error: 'Bad Request', message: 'nope', errors: 'not a map' },
+      HttpStatus.BAD_REQUEST,
+    );
+
+    new AllExceptionsFilter().catch(exception, host);
+
+    expect(json.mock.calls[0][0]).not.toHaveProperty('errors');
+  });
+});

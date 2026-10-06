@@ -20,6 +20,17 @@ function titleCaseReason(status: HttpStatus): string {
     .join(' ');
 }
 
+function isFieldErrorMap(value: unknown): value is Record<string, string[]> {
+  return (
+    typeof value === 'object' &&
+    value !== null &&
+    !Array.isArray(value) &&
+    Object.values(value).every(
+      (messages) => Array.isArray(messages) && messages.every((m) => typeof m === 'string'),
+    )
+  );
+}
+
 @Catch()
 export class AllExceptionsFilter implements ExceptionFilter {
   private readonly logger = new Logger(AllExceptionsFilter.name);
@@ -39,6 +50,7 @@ export class AllExceptionsFilter implements ExceptionFilter {
     // message, path, timestamp} would discard exactly the detail that names
     // which indicator failed, so it is passed through unchanged instead.
     let passthroughBody: Record<string, unknown> | undefined;
+    let fieldErrors: Record<string, string[]> | undefined;
 
     if (exception instanceof HttpException) {
       status = exception.getStatus();
@@ -54,6 +66,7 @@ export class AllExceptionsFilter implements ExceptionFilter {
         } else {
           message = (record.message as string | string[] | undefined) ?? exception.message;
           error = typeof record.error === 'string' ? record.error : titleCaseReason(status);
+          if (isFieldErrorMap(record.errors)) fieldErrors = record.errors;
         }
       } else {
         message = exception.message;
@@ -83,6 +96,7 @@ export class AllExceptionsFilter implements ExceptionFilter {
         statusCode: status,
         error,
         message,
+        ...(fieldErrors ? { errors: fieldErrors } : {}),
         path: request.url,
         timestamp: new Date().toISOString(),
       },
