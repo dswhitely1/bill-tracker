@@ -30,6 +30,11 @@ export const routes: Routes = [
     children: [
       { path: '', pathMatch: 'full', redirectTo: 'upcoming' },
       {
+        path: 'upcoming',
+        loadComponent: () =>
+          import('./instances/upcoming.component').then((m) => m.UpcomingComponent),
+      },
+      {
         path: 'bills',
         loadComponent: () => import('./bills/bills.component').then((m) => m.BillsComponent),
       },
