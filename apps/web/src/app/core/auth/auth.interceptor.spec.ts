@@ -125,6 +125,7 @@ describe('the 401 path', () => {
   });
 
   it('surfaces the error instead of refreshing again when the retry also fails with 401', () => {
+    const navigate = vi.spyOn(router, 'navigate').mockResolvedValue(true);
     session.signIn({ accessToken: 'stale', user: profile });
     const errors: unknown[] = [];
     client.get('/api/bills').subscribe({ error: (e) => errors.push(e) });
@@ -136,6 +137,11 @@ describe('the 401 path', () => {
     // Exactly one refresh, and the second failure reaches the caller.
     expect(http.match('/api/auth/refresh')).toHaveLength(0);
     expect(errors).toHaveLength(1);
+    // The retried request's own failure must not be treated as a refresh
+    // failure: the refresh succeeded. Signing the user out here is the
+    // regression that moving catchError after switchMap would introduce.
+    expect(session.isAuthenticated()).toBe(true);
+    expect(navigate).not.toHaveBeenCalled();
   });
 });
 

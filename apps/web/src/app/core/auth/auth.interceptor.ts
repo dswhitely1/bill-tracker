@@ -5,22 +5,10 @@ import {
 } from '@angular/common/http';
 import { inject } from '@angular/core';
 import { Router } from '@angular/router';
-import { Observable, catchError, switchMap, throwError } from 'rxjs';
+import { catchError, switchMap, throwError } from 'rxjs';
 import { API_BASE } from '../api/api.constants';
 import { SKIP_AUTH_RETRY } from './auth.tokens';
 import { SessionService } from './session.service';
-
-/**
- * Identifies the last failed refresh this interceptor has already reacted
- * to. `SessionService.refresh()` hands the identical `Observable` instance
- * to every caller for the life of one in-flight cycle, so several requests
- * that all 401 at once each attach their own `catchError` to that same
- * object. Without this check, each of them would independently clear the
- * session and navigate — once per waiting request instead of once per
- * actual failure. A later, genuinely new refresh cycle returns a new
- * instance, so it is free to navigate again.
- */
-let lastHandledFailure: Observable<string> | null = null;
 
 /**
  * Refreshing after a rejected sign-in is meaningless, and refreshing after
@@ -76,11 +64,13 @@ export const authInterceptor: HttpInterceptorFn = (request, next) => {
         return throwError(() => error);
       }
 
-      const refresh$ = session.refresh();
-      return refresh$.pipe(
+      return session.refresh().pipe(
         catchError((refreshError: unknown) => {
-          if (lastHandledFailure !== refresh$) {
-            lastHandledFailure = refresh$;
+          // Every waiter on the shared refresh observable lands here, so
+          // the first one to arrive does the work and the rest see a
+          // session that is already cleared. A genuinely later failure,
+          // after a new sign-in, navigates again.
+          if (session.isAuthenticated()) {
             session.clear();
             void router.navigate(['/login'], { queryParams: { reason: 'expired' } });
           }
