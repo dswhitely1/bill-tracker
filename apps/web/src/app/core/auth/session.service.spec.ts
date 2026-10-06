@@ -91,7 +91,10 @@ describe('restore', () => {
     expect(session.user()).toEqual(profile);
   });
 
-  it('marks its profile read retry-exempt, so a 401 there cannot start a second refresh', async () => {
+  it('sets the retry-exempt flag on its profile read', async () => {
+    // The interceptor's own suite proves a 401 here cannot start a second
+    // refresh; this pins that `restore()` actually sets the flag it
+    // depends on.
     const restored = session.restore();
 
     http.expectOne('/api/auth/refresh').flush({ accessToken: 'token-1' });
