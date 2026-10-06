@@ -30,6 +30,20 @@ export const routes: Routes = [
     children: [
       { path: '', pathMatch: 'full', redirectTo: 'upcoming' },
       {
+        path: 'bills',
+        loadComponent: () => import('./bills/bills.component').then((m) => m.BillsComponent),
+      },
+      {
+        path: 'bills/new',
+        loadComponent: () =>
+          import('./bills/bill-form.component').then((m) => m.BillFormComponent),
+      },
+      {
+        path: 'bills/:id',
+        loadComponent: () =>
+          import('./bills/bill-form.component').then((m) => m.BillFormComponent),
+      },
+      {
         path: 'categories',
         loadComponent: () =>
           import('./categories/categories.component').then((m) => m.CategoriesComponent),
