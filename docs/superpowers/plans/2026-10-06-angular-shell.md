@@ -6920,15 +6920,22 @@ describe('BillsComponent', () => {
     // The API offers a non-destructive path and the README documents the
     // distinction. The dialog must lead with it rather than with the
     // action that destroys payment history.
-    const open = vi
-      .spyOn(TestBed.inject(MatDialog), 'open')
-      .mockReturnValue({ afterClosed: () => of(undefined) } as never);
-
+    //
+    // The spy targets the component's own injector, not
+    // `TestBed.inject(MatDialog)`: with `provideRouter` and
+    // `provideHttpClient` both present, `MatDialog` (`providedIn: 'root'`)
+    // resolves to two distinct instances depending on which injector asks
+    // first. Spying on the wrong one silently misses every call the
+    // component makes, and the test then opens a real dialog nothing closes.
     const fixture = TestBed.createComponent(BillsComponent);
     await fixture.whenStable();
     flushInitialLoads();
     await fixture.whenStable();
     await fixture.whenStable();
+
+    const open = vi
+      .spyOn(fixture.componentRef.injector.get(MatDialog), 'open')
+      .mockReturnValue({ afterClosed: () => of(undefined) } as never);
 
     await fixture.componentInstance.confirmRemove(rent);
 
@@ -6938,17 +6945,26 @@ describe('BillsComponent', () => {
   });
 
   it('deactivates rather than deleting when the alternate action is chosen', async () => {
-    vi.spyOn(TestBed.inject(MatDialog), 'open').mockReturnValue({
-      afterClosed: () => of('alternate'),
-    } as never);
-
     const fixture = TestBed.createComponent(BillsComponent);
     await fixture.whenStable();
     flushInitialLoads();
     await fixture.whenStable();
     await fixture.whenStable();
 
+    const open = vi
+      .spyOn(fixture.componentRef.injector.get(MatDialog), 'open')
+      .mockReturnValue({ afterClosed: () => of('alternate') } as never);
+
     const done = fixture.componentInstance.confirmRemove(rent);
+
+    // Assert the alternate was actually offered before relying on it being
+    // chosen. A mock that resolves 'alternate' unconditionally passes even
+    // when the alternate has been removed from the dialog entirely — which
+    // is exactly what the Step 17 mutation does, and why that mutation
+    // failed one test here instead of the two predicted.
+    const data = open.mock.calls[0][1]?.data as { alternateLabel?: string };
+    expect(data.alternateLabel).toBe('Deactivate instead');
+
     const req = http.expectOne('/api/bills/bill-1');
     expect(req.request.method).toBe('PATCH');
     expect(req.request.body).toEqual({ isActive: false });
@@ -6957,15 +6973,15 @@ describe('BillsComponent', () => {
   });
 
   it('deletes when the destructive action is chosen', async () => {
-    vi.spyOn(TestBed.inject(MatDialog), 'open').mockReturnValue({
-      afterClosed: () => of('confirm'),
-    } as never);
-
     const fixture = TestBed.createComponent(BillsComponent);
     await fixture.whenStable();
     flushInitialLoads();
     await fixture.whenStable();
     await fixture.whenStable();
+
+    vi.spyOn(fixture.componentRef.injector.get(MatDialog), 'open').mockReturnValue({
+      afterClosed: () => of('confirm'),
+    } as never);
 
     const done = fixture.componentInstance.confirmRemove(rent);
     const req = http.expectOne('/api/bills/bill-1');
@@ -9690,13 +9706,27 @@ Add to the styles block:
 Append to `apps/web/src/app/instances/upcoming.component.spec.ts`:
 
 ```ts
+import { ComponentFixture } from '@angular/core/testing';
 import { MatDialog } from '@angular/material/dialog';
 import { of } from 'rxjs';
 import { vi } from 'vitest';
 
-function dialogReturning(value: unknown) {
+/**
+ * Spies on the dialog the component will actually use.
+ *
+ * It must take the fixture rather than reaching for `TestBed.inject`: with
+ * `provideRouter` and `provideHttpClient` both present, `MatDialog`
+ * (`providedIn: 'root'`) resolves to two distinct instances depending on
+ * which injector asks first — the component's own and the TestBed module's.
+ * Spying on the wrong one silently misses every call the component makes,
+ * and the test then opens a real dialog that nothing ever closes.
+ */
+function dialogReturning(
+  fixture: ComponentFixture<UpcomingComponent>,
+  value: unknown,
+) {
   return vi
-    .spyOn(TestBed.inject(MatDialog), 'open')
+    .spyOn(fixture.componentRef.injector.get(MatDialog), 'open')
     .mockReturnValue({ afterClosed: () => of(value) } as never);
 }
 
@@ -9711,8 +9741,8 @@ const payment = {
 
 describe('payment actions', () => {
   it('records a payment and patches the row from the response', async () => {
-    dialogReturning({ note: null });
     const fixture = TestBed.createComponent(UpcomingComponent);
+    dialogReturning(fixture, { note: null });
     await fixture.whenStable();
     instancesRequest().flush([base]);
     await fixture.whenStable();
@@ -9730,8 +9760,8 @@ describe('payment actions', () => {
   });
 
   it('shows a failed payment without changing the row', async () => {
-    dialogReturning({ note: null });
     const fixture = TestBed.createComponent(UpcomingComponent);
+    dialogReturning(fixture, { note: null });
     await fixture.whenStable();
     instancesRequest().flush([base]);
     await fixture.whenStable();
@@ -9750,8 +9780,8 @@ describe('payment actions', () => {
   });
 
   it('sends nothing when the dialog is dismissed', async () => {
-    dialogReturning(undefined);
     const fixture = TestBed.createComponent(UpcomingComponent);
+    dialogReturning(fixture, undefined);
     await fixture.whenStable();
     instancesRequest().flush([base]);
     await fixture.whenStable();
