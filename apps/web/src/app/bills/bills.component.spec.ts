@@ -126,11 +126,19 @@ describe('BillsComponent', () => {
     await fixture.whenStable();
     await fixture.whenStable();
 
-    vi.spyOn(fixture.componentRef.injector.get(MatDialog), 'open').mockReturnValue({
-      afterClosed: () => of('alternate'),
-    } as never);
+    const open = vi
+      .spyOn(fixture.componentRef.injector.get(MatDialog), 'open')
+      .mockReturnValue({ afterClosed: () => of('alternate') } as never);
 
     const done = fixture.componentInstance.confirmRemove(rent);
+
+    // Assert the alternate was actually offered before relying on it being
+    // chosen. A mock that resolves 'alternate' unconditionally passes even
+    // when the alternate has been removed from the dialog entirely — which
+    // is exactly what the Step 17 mutation does.
+    const data = open.mock.calls[0][1]?.data as { alternateLabel?: string };
+    expect(data.alternateLabel).toBe('Deactivate instead');
+
     // The dialog's choice resolves through `firstValueFrom`, which is a
     // native Promise: the HTTP call it leads to is not dispatched until a
     // microtask after `confirmRemove` returns its own pending promise.
