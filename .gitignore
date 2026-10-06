@@ -188,3 +188,8 @@ Thumbs.db
 .nx/self-healing
 .nx/migrate-runs
 vitest.config.*.timestamp*
+.angular
+
+__screenshots__/
+
+test-output
