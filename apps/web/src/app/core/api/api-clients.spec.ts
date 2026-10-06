@@ -42,7 +42,9 @@ describe('AuthApi', () => {
 
   it('posts to logout', () => {
     TestBed.inject(AuthApi).logout().subscribe();
-    http.expectOne('/api/auth/logout').flush(null);
+    const req = http.expectOne('/api/auth/logout');
+    expect(req.request.method).toBe('POST');
+    req.flush(null);
   });
 });
 
