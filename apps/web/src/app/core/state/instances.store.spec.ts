@@ -166,6 +166,45 @@ describe('setQuery', () => {
   });
 });
 
+describe('fetchedOn', () => {
+  it('is set only once a fetch has actually succeeded', async () => {
+    expect(store.fetchedOn()).toBeNull();
+
+    const done = store.setQuery({ from: '2026-10-01', to: '2026-10-31' });
+    expect(store.fetchedOn()).toBeNull();
+    instanceRequest().flush([instance]);
+    await done;
+
+    expect(store.fetchedOn()).not.toBeNull();
+  });
+
+  it('is left untouched by a range refused before it reaches the server', async () => {
+    // A component that bumped its own day marker before calling
+    // `setQuery` would be fooled into skipping a refetch here. The store
+    // owning the marker, and only advancing it on success, is what keeps
+    // a refused range from being mistaken for a fresh one.
+    const done = store.setQuery({ from: '2026-10-01', to: '2026-10-31' });
+    instanceRequest().flush([instance]);
+    await done;
+    const fetchedOn = store.fetchedOn();
+
+    await store.setQuery({ from: '2026-01-01', to: '2027-06-01' });
+
+    expect(store.fetchedOn()).toBe(fetchedOn);
+  });
+
+  it('is cleared when the session ends', async () => {
+    const done = store.setQuery({ from: '2026-10-01', to: '2026-10-31' });
+    instanceRequest().flush([instance]);
+    await done;
+
+    session.clear();
+    TestBed.tick();
+
+    expect(store.fetchedOn()).toBeNull();
+  });
+});
+
 describe('patch', () => {
   it('replaces one row in place', async () => {
     const done = store.setQuery({ from: '2026-10-01', to: '2026-10-31' });

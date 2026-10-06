@@ -1,12 +1,15 @@
 import { provideHttpClient } from '@angular/common/http';
 import { HttpTestingController, provideHttpClientTesting } from '@angular/common/http/testing';
 import { provideZonelessChangeDetection } from '@angular/core';
-import { TestBed } from '@angular/core/testing';
+import { ComponentFixture, TestBed } from '@angular/core/testing';
 import { provideRouter } from '@angular/router';
 import { MATERIAL_ANIMATIONS } from '@angular/material/core';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { MatDialog } from '@angular/material/dialog';
+import { of } from 'rxjs';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { SessionService } from '../core/auth/session.service';
 import { provideCalendarDateAdapter } from '../core/date/calendar-date.adapter';
+import { InstancesStore } from '../core/state/instances.store';
 import { UpcomingComponent } from './upcoming.component';
 
 let http: HttpTestingController;
@@ -170,7 +173,7 @@ describe('the range controls', () => {
 });
 
 describe('the day boundary', () => {
-  it('refetches when the browser day has changed since the rows were rendered', async () => {
+  it('refetches when the browser day has changed since the rows were fetched', async () => {
     // `isOverdue` goes stale at midnight. A tab left open overnight would
     // otherwise show yesterday's answer indefinitely.
     const fixture = TestBed.createComponent(UpcomingComponent);
@@ -179,13 +182,17 @@ describe('the day boundary', () => {
     await fixture.whenStable();
     await fixture.whenStable();
 
-    const renderedOn = fixture.componentInstance.renderedOn();
+    const store = TestBed.inject(InstancesStore);
+    expect(store.fetchedOn()).not.toBeNull();
+
+    // A date far from whatever the real fetch stamped stands in for "the
+    // browser day has moved on" — the component cannot fake the system
+    // clock, only the day it compares against.
     fixture.componentInstance.refreshIfDayChanged('2099-01-01');
     await fixture.whenStable();
 
     instancesRequest().flush([base]);
-    expect(fixture.componentInstance.renderedOn()).toBe('2099-01-01');
-    expect(renderedOn).not.toBe('2099-01-01');
+    await fixture.whenStable();
   });
 
   it('does not refetch when the day is unchanged', async () => {
@@ -195,9 +202,126 @@ describe('the day boundary', () => {
     await fixture.whenStable();
     await fixture.whenStable();
 
-    fixture.componentInstance.refreshIfDayChanged(fixture.componentInstance.renderedOn());
+    const store = TestBed.inject(InstancesStore);
+    fixture.componentInstance.refreshIfDayChanged(store.fetchedOn() ?? undefined);
     await fixture.whenStable();
 
     expect(http.match((r) => r.url === '/api/bill-instances')).toHaveLength(0);
+  });
+
+  it('does not let a refused range advance the day marker, so a later check still refetches', async () => {
+    // Review addition for Task 12. `load()` used to stamp a component-local
+    // marker with `today()` before calling `store.setQuery`, even when the
+    // range was refused as invalid or over-wide and no fetch happened. That
+    // let a refused submission convince `refreshIfDayChanged` that stale
+    // rows were fresh. The store now owns the marker and only advances it
+    // on a fetch that actually succeeds.
+    const fixture = TestBed.createComponent(UpcomingComponent);
+    await fixture.whenStable();
+    instancesRequest().flush([base]);
+    await fixture.whenStable();
+    await fixture.whenStable();
+
+    const store = TestBed.inject(InstancesStore);
+    const fetchedOn = store.fetchedOn();
+
+    fixture.componentInstance.rangeForm.setValue({ from: '2026-01-01', to: '2027-06-01' });
+    await fixture.componentInstance.applyRange();
+    await fixture.whenStable();
+    expect(http.match((r) => r.url === '/api/bill-instances')).toHaveLength(0);
+    expect(store.fetchedOn()).toBe(fetchedOn);
+
+    fixture.componentInstance.refreshIfDayChanged('2099-01-01');
+    await fixture.whenStable();
+
+    instancesRequest().flush([base]);
+    await fixture.whenStable();
+  });
+});
+
+/**
+ * Spies on the dialog the component will actually use.
+ *
+ * It must take the fixture rather than reaching for `TestBed.inject`: with
+ * `provideRouter` and `provideHttpClient` both present, `MatDialog`
+ * (`providedIn: 'root'`) resolves to two distinct instances depending on
+ * which injector asks first — the component's own and the TestBed module's.
+ * Spying on the wrong one silently misses every call the component makes,
+ * and the test then opens a real dialog that nothing ever closes.
+ */
+function dialogReturning(
+  fixture: ComponentFixture<UpcomingComponent>,
+  value: unknown,
+) {
+  return vi
+    .spyOn(fixture.componentRef.injector.get(MatDialog), 'open')
+    .mockReturnValue({ afterClosed: () => of(value) } as never);
+}
+
+const payment = {
+  id: 'pay-1',
+  billInstanceId: 'inst-1',
+  amountPaid: 1200,
+  paidAt: '2026-10-01T12:00:00.000Z',
+  note: null,
+  reversesPaymentId: null,
+};
+
+describe('payment actions', () => {
+  it('records a payment and patches the row from the response', async () => {
+    const fixture = TestBed.createComponent(UpcomingComponent);
+    dialogReturning(fixture, { note: null });
+    await fixture.whenStable();
+    instancesRequest().flush([base]);
+    await fixture.whenStable();
+    await fixture.whenStable();
+
+    const done = fixture.componentInstance.openPayment(base);
+    // The dialog's `afterClosed()` settles through its own promise hop
+    // before `openPayment` reaches the HTTP call, so the request does not
+    // exist yet on the tick `openPayment` is invoked.
+    await fixture.whenStable();
+    const req = http.expectOne('/api/bill-instances/inst-1/payments');
+    expect(req.request.body).toEqual({ note: null });
+    req.flush({ instance: { ...base, status: 'PAID', amountPaid: 1200 }, payment });
+    await done;
+    await fixture.whenStable();
+    await fixture.whenStable();
+
+    expect(fixture.nativeElement.textContent).toContain('Paid');
+  });
+
+  it('shows a failed payment without changing the row', async () => {
+    const fixture = TestBed.createComponent(UpcomingComponent);
+    dialogReturning(fixture, { note: null });
+    await fixture.whenStable();
+    instancesRequest().flush([base]);
+    await fixture.whenStable();
+    await fixture.whenStable();
+
+    const done = fixture.componentInstance.openPayment(base);
+    await fixture.whenStable();
+    http
+      .expectOne('/api/bill-instances/inst-1/payments')
+      .flush({ message: 'Amount exceeds the balance' }, { status: 400, statusText: 'Bad Request' });
+    await done;
+    await fixture.whenStable();
+    await fixture.whenStable();
+
+    expect(fixture.componentInstance.actionError()).toContain('Amount exceeds the balance');
+    expect(fixture.nativeElement.textContent).toContain('Unpaid');
+  });
+
+  it('sends nothing when the dialog is dismissed', async () => {
+    const fixture = TestBed.createComponent(UpcomingComponent);
+    dialogReturning(fixture, undefined);
+    await fixture.whenStable();
+    instancesRequest().flush([base]);
+    await fixture.whenStable();
+    await fixture.whenStable();
+
+    await fixture.componentInstance.openPayment(base);
+
+    expect(http.match('/api/bill-instances/inst-1/payments')).toHaveLength(0);
   });
 });

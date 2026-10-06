@@ -53,12 +53,22 @@ export class InstancesStore {
   private readonly loadingState = signal(false);
   private readonly errorState = signal<string | null>(null);
   private readonly loaded = signal(false);
+  private readonly fetchedOnState = signal<CalendarDate | null>(null);
 
   readonly instances = this.items.asReadonly();
   readonly query = this.currentQuery.asReadonly();
   readonly loading = this.loadingState.asReadonly();
   readonly error = this.errorState.asReadonly();
   readonly isEmpty = computed(() => this.loaded() && this.items().length === 0);
+
+  /**
+   * The browser day the rows currently held were last fetched on. Set only
+   * when a fetch succeeds — a range refused by `setQuery` (over-wide,
+   * backwards) never reaches `fetch()`, so it cannot advance this. The
+   * component owns no day marker of its own for exactly that reason: it
+   * can only mark a day as fetched by actually fetching.
+   */
+  readonly fetchedOn = this.fetchedOnState.asReadonly();
 
   constructor() {
     effect(() => {
@@ -114,6 +124,7 @@ export class InstancesStore {
     this.loaded.set(false);
     this.errorState.set(null);
     this.loadingState.set(false);
+    this.fetchedOnState.set(null);
   }
 
   private async fetch(): Promise<void> {
@@ -122,6 +133,7 @@ export class InstancesStore {
     try {
       this.items.set(await firstValueFrom(this.api.list(this.currentQuery())));
       this.loaded.set(true);
+      this.fetchedOnState.set(today());
     } catch (error: unknown) {
       this.errorState.set(errorMessage(error));
     } finally {
