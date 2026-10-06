@@ -615,6 +615,7 @@ run it and then assert the end state; where the generator's choice differs
 from what is specified, the specified value wins.
 
 **Files:**
+- Modify: `package.json`, `package-lock.json` — the pinned plugin install
 - Create: `apps/web/**` (generated), `apps/web-e2e/**` (generated)
 - Create: `apps/web/src/app/core/README.md`
 - Modify: `apps/web/src/app/app.config.ts`
@@ -628,7 +629,18 @@ from what is specified, the specified value wins.
 - Consumes: `BILL_FREQUENCIES` and `ValidationErrorResponse` from `@bill-tracker/shared-types` (Task 1).
 - Produces: the `web` and `web-e2e` Nx projects; `apps/web/src/app/app.config.ts` exporting `appConfig: ApplicationConfig`; `apps/web/src/app/app.routes.ts` exporting `routes: Routes`.
 
-- [ ] **Step 1: Generate the application**
+- [ ] **Step 1: Install the Nx Angular plugin, pinned**
+
+```bash
+npm install -D @nx/angular@23.2.0 @nx/playwright@23.2.0
+```
+
+Install before generating, not during. `nx g` on a plugin that is not
+present offers to fetch it, and what it fetches is the latest — 23.2.1 —
+which breaks the Global Constraint that every `@nx/*` package sits at
+23.2.0. Pinning here makes the version a decision rather than a default.
+
+- [ ] **Step 2: Generate the application**
 
 ```bash
 npx nx g @nx/angular:application web \
@@ -648,7 +660,7 @@ npx nx g @nx/angular:application web \
   --no-interactive
 ```
 
-- [ ] **Step 2: Install Material and the CDK**
+- [ ] **Step 3: Install Material and the CDK**
 
 ```bash
 npm install @angular/material@22.2.1 @angular/cdk@22.2.1
@@ -656,7 +668,7 @@ npm install @angular/material@22.2.1 @angular/cdk@22.2.1
 
 Pin both to 22.2.1 exactly, matching `@angular/core`.
 
-- [ ] **Step 3: Report what the generator produced**
+- [ ] **Step 4: Report what the generator produced**
 
 Run and read the output; later steps correct whatever differs:
 
@@ -671,7 +683,7 @@ git status --porcelain
 Record in the task report: the project's target names, whether `test`
 exists, and whether `proxy.conf.json` was written.
 
-- [ ] **Step 4: Fix the TypeScript wiring**
+- [ ] **Step 5: Fix the TypeScript wiring**
 
 `tsconfig.base.json` sets `"lib": ["es2022"]` with no `dom`, because the
 API has no business seeing DOM types. **Do not change the base file.**
@@ -701,7 +713,7 @@ In the root `tsconfig.json`, add `apps/web` to `references`, after
 { "path": "./apps/web" }
 ```
 
-- [ ] **Step 5: Write the Material theme**
+- [ ] **Step 6: Write the Material theme**
 
 Replace `apps/web/src/styles.scss` with:
 
@@ -736,7 +748,7 @@ body {
 }
 ```
 
-- [ ] **Step 6: Write the application config**
+- [ ] **Step 7: Write the application config**
 
 Replace `apps/web/src/app/app.config.ts` with:
 
@@ -766,7 +778,7 @@ The interceptor array is empty on purpose — Task 6 fills it. The date
 adapter providers arrive in Task 4 and the app initializer in Task 6; this
 file is edited three more times and each edit is additive.
 
-- [ ] **Step 7: Write the failing smoke test**
+- [ ] **Step 8: Write the failing smoke test**
 
 This test is the whole point of the task. It renders a Material component
 under zoneless change detection, driven by a runtime value imported from
@@ -820,13 +832,13 @@ describe('App', () => {
 });
 ```
 
-- [ ] **Step 8: Run the test to verify it fails**
+- [ ] **Step 9: Run the test to verify it fails**
 
 Run: `npx nx test web`
 Expected: FAIL — `App` renders the generator's placeholder markup, so no
 `mat-chip` elements exist.
 
-- [ ] **Step 9: Write the component**
+- [ ] **Step 10: Write the component**
 
 Replace `apps/web/src/app/app.ts` with:
 
@@ -867,12 +879,12 @@ Replace `apps/web/src/app/app.html` with:
 <router-outlet />
 ```
 
-- [ ] **Step 10: Run the test to verify it passes**
+- [ ] **Step 11: Run the test to verify it passes**
 
 Run: `npx nx test web`
 Expected: PASS, 2 tests.
 
-- [ ] **Step 11: Verify the whole workspace still agrees**
+- [ ] **Step 12: Verify the whole workspace still agrees**
 
 ```bash
 npx nx run-many -t lint typecheck build test --skip-nx-cache
@@ -884,7 +896,7 @@ generator did not create it under a name the plugin infers — fix the
 project's `package.json` `nx.targets` rather than disabling the check, and
 record what was wrong in the task report.
 
-- [ ] **Step 12: Verify the development proxy exists**
+- [ ] **Step 13: Verify the development proxy exists**
 
 Run: `cat apps/web/proxy.conf.json`
 Expected: a mapping for `/api` to `http://localhost:3000`. If the file is
@@ -909,7 +921,7 @@ spec §7 describes.
 Do not start the dev server as part of this step. Nothing in this plan
 leaves a server process running.
 
-- [ ] **Step 13: Prove the smoke test can fail**
+- [ ] **Step 14: Prove the smoke test can fail**
 
 Temporarily change `BILL_FREQUENCIES` in the import to a locally declared
 `const BILL_FREQUENCIES = ['ONE_TIME'] as const;` in `app.ts`.
@@ -920,7 +932,7 @@ Expected: FAIL on the chip count.
 Restore the import and re-run. Expected: PASS. Without this step the test
 would still pass if the shared library quietly resolved to nothing.
 
-- [ ] **Step 14: Commit**
+- [ ] **Step 15: Commit**
 
 ```bash
 git add apps/web apps/web-e2e tsconfig.json package.json package-lock.json nx.json
