@@ -1,45 +1,55 @@
-import { TestBed } from '@angular/core/testing';
+import { provideHttpClient } from '@angular/common/http';
+import { provideHttpClientTesting } from '@angular/common/http/testing';
 import { provideZonelessChangeDetection } from '@angular/core';
-import { provideRouter } from '@angular/router';
+import { TestBed } from '@angular/core/testing';
+import { Router, provideRouter } from '@angular/router';
 import { MATERIAL_ANIMATIONS } from '@angular/material/core';
-import { describe, expect, it } from 'vitest';
-import { BILL_FREQUENCIES } from '@bill-tracker/shared-types';
+import { beforeEach, describe, expect, it } from 'vitest';
 import { App } from './app';
+import { routes } from './app.routes';
 
-describe('App', () => {
-  it('renders one Material chip per bill frequency, proving the shared library resolves at runtime', async () => {
-    await TestBed.configureTestingModule({
-      imports: [App],
-      providers: [
-        provideZonelessChangeDetection(),
-        provideRouter([]),
-        {
-          provide: MATERIAL_ANIMATIONS,
-          useValue: { animationsDisabled: true },
-        },
-      ],
-    }).compileComponents();
+beforeEach(() => {
+  TestBed.configureTestingModule({
+    imports: [App],
+    providers: [
+      provideZonelessChangeDetection(),
+      provideRouter(routes),
+      provideHttpClient(),
+      provideHttpClientTesting(),
+      { provide: MATERIAL_ANIMATIONS, useValue: { animationsDisabled: true } },
+    ],
+  });
+});
 
+describe('routing', () => {
+  it('renders the not-found screen for an unknown path', async () => {
+    const router = TestBed.inject(Router);
     const fixture = TestBed.createComponent(App);
+
+    await router.navigateByUrl('/nonsense');
     await fixture.whenStable();
 
-    const chips = fixture.nativeElement.querySelectorAll('mat-chip');
-    expect(chips).toHaveLength(BILL_FREQUENCIES.length);
-    expect(chips[0].textContent?.trim()).toBe('ONE_TIME');
+    expect(fixture.nativeElement.textContent).toContain('That page does not exist');
   });
 
-  it('types a value against the error contract added in task 1', () => {
-    // A compile-time assertion with a runtime witness: if the contract is
-    // not exported, this file does not build.
-    const body: import('@bill-tracker/shared-types').ValidationErrorResponse = {
-      statusCode: 400,
-      error: 'Bad Request',
-      message: ['name should not be empty'],
-      errors: { name: ['name should not be empty'] },
-      path: '/api/bills',
-      timestamp: '2026-10-06T00:00:00.000Z',
-    };
+  it('shows the login screen without a guard redirect loop', async () => {
+    const router = TestBed.inject(Router);
+    const fixture = TestBed.createComponent(App);
 
-    expect(body.errors['name']).toHaveLength(1);
+    await router.navigateByUrl('/login');
+    await fixture.whenStable();
+
+    expect(router.url).toBe('/login');
+    expect(fixture.nativeElement.textContent).toContain('Sign in');
+  });
+
+  it('shows the register screen', async () => {
+    const router = TestBed.inject(Router);
+    const fixture = TestBed.createComponent(App);
+
+    await router.navigateByUrl('/register');
+    await fixture.whenStable();
+
+    expect(fixture.nativeElement.textContent).toContain('Create an account');
   });
 });
