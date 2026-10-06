@@ -119,7 +119,10 @@ describe('overdue comes from the server', () => {
     await fixture.whenStable();
     await fixture.whenStable();
 
-    expect(fixture.nativeElement.textContent).toContain('Overdue');
+    // Query the badge itself, not page text: the filter control also says
+    // "Overdue", so a textContent check is vacuously true in one direction
+    // and unsatisfiable in the other.
+    expect(fixture.nativeElement.querySelector('.overdue-chip')).not.toBeNull();
   });
 
   it('does not mark a row overdue when the server says it is not, however old it is', async () => {
@@ -129,7 +132,7 @@ describe('overdue comes from the server', () => {
     await fixture.whenStable();
     await fixture.whenStable();
 
-    expect(fixture.nativeElement.textContent).not.toContain('Overdue');
+    expect(fixture.nativeElement.querySelector('.overdue-chip')).toBeNull();
   });
 });
 

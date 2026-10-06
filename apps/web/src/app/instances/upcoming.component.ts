@@ -63,13 +63,7 @@ import { InstanceRowComponent } from './instance-row.component';
       </mat-form-field>
 
       <mat-form-field>
-        <!--
-          Labelled "Due", not "Overdue": the badge rendered for an overdue
-          row reads "Overdue", and a page-wide textContent check cannot
-          tell that badge apart from a static filter label carrying the
-          same word.
-        -->
-        <mat-label>Due</mat-label>
+        <mat-label>Overdue</mat-label>
         <mat-select [value]="overdue()" (valueChange)="setOverdue($event)">
           <mat-option [value]="null">Any</mat-option>
           <mat-option [value]="true">Overdue only</mat-option>
