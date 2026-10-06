@@ -22,6 +22,8 @@
 - `GET /api/bill-instances` **requires `from` and `to`**, `to >= from`, span at most **400 days**. There is no cursor.
 - A resource belonging to another user returns **404, never 403**. A 401 from a non-auth route can only mean a token problem.
 - Every new file is covered by a test in the same task. Tests are written before the implementation.
+- **The `web` project's test target rejects positional filters.** It is Angular's `@angular/build:unit-test` builder, so `nx test web -- <pattern>` fails outright; use `--include='**/<name>.spec.ts'`. The `api` project is different — its `@nx/vitest` target does accept positional filters.
+- **`TZ` is not part of the Nx cache key.** Any timezone-sensitive run must pass `--skip-nx-cache`, or a second zone is served from the first zone's cache and proves nothing. When reporting a timezone run, state the offset it actually executed at (`TZ=<zone> date +%z`), not the one intended.
 - Existing API behaviour does not change except as Task 1 specifies. Every existing test stays green.
 - Never run `docker compose down -v`, never run `git clean` in any form, never drop or recreate a database, and never leave a server process running after a task.
 - `.env` is gitignored and holds a generated secret. It is never committed and never printed.
@@ -1192,7 +1194,7 @@ describe('today', () => {
 
 - [ ] **Step 2: Run the test to verify it fails**
 
-Run: `npx nx test web -- calendar-date.spec`
+Run: `npx nx test web --include='**/calendar-date.spec.ts'`
 Expected: FAIL — cannot resolve `./calendar-date`.
 
 - [ ] **Step 3: Write the module**
@@ -1367,14 +1369,14 @@ export function today(): CalendarDate {
 
 - [ ] **Step 4: Run the test to verify it passes**
 
-Run: `npx nx test web -- calendar-date.spec`
+Run: `npx nx test web --include='**/calendar-date.spec.ts'`
 Expected: PASS.
 
 - [ ] **Step 5: Run the suite under a non-UTC time zone**
 
-Run: `TZ=America/New_York npx nx test web -- calendar-date.spec`
-Then: `TZ=Pacific/Kiritimati npx nx test web -- calendar-date.spec`
-Then: `TZ=Pacific/Pago_Pago npx nx test web -- calendar-date.spec`
+Run: `TZ=America/New_York npx nx test web --skip-nx-cache --include='**/calendar-date.spec.ts'`
+Then: `TZ=Pacific/Kiritimati npx nx test web --skip-nx-cache --include='**/calendar-date.spec.ts'`
+Then: `TZ=Pacific/Pago_Pago npx nx test web --skip-nx-cache --include='**/calendar-date.spec.ts'`
 
 Expected: PASS in all three. Kiritimati is UTC+14 and Pago Pago is UTC-11;
 together they straddle every date boundary a browser can sit on. A failure
@@ -1435,7 +1437,7 @@ describe('CalendarDatePipe', () => {
 
 - [ ] **Step 8: Run the test to verify it fails**
 
-Run: `npx nx test web -- calendar-date.pipe`
+Run: `npx nx test web --include='**/calendar-date.pipe.spec.ts'`
 Expected: FAIL — cannot resolve `./calendar-date.pipe`.
 
 - [ ] **Step 9: Write the pipe**
@@ -1488,7 +1490,7 @@ export class CalendarDatePipe implements PipeTransform {
 
 - [ ] **Step 10: Run the test to verify it passes**
 
-Run: `TZ=Pacific/Pago_Pago npx nx test web -- calendar-date.pipe`
+Run: `TZ=Pacific/Pago_Pago npx nx test web --skip-nx-cache --include='**/calendar-date.pipe.spec.ts'`
 Expected: PASS. Running this one under a negative-offset zone is the
 point — a `DatePipe`-based implementation fails here and passes under UTC.
 
@@ -1842,7 +1844,7 @@ describe('the datepicker driven by the adapter', () => {
 
 - [ ] **Step 2: Run the test to verify it fails**
 
-Run: `npx nx test web -- calendar-date.adapter`
+Run: `npx nx test web --include='**/calendar-date.adapter.spec.ts'`
 Expected: FAIL — cannot resolve `./calendar-date.adapter`.
 
 - [ ] **Step 3: Write the adapter**
@@ -2053,12 +2055,12 @@ export function provideCalendarDateAdapter(): Provider[] {
 
 - [ ] **Step 4: Run the test to verify it passes**
 
-Run: `npx nx test web -- calendar-date.adapter`
+Run: `npx nx test web --include='**/calendar-date.adapter.spec.ts'`
 Expected: PASS.
 
 - [ ] **Step 5: Run it under a negative-offset time zone**
 
-Run: `TZ=Pacific/Pago_Pago npx nx test web -- calendar-date.adapter`
+Run: `TZ=Pacific/Pago_Pago npx nx test web --skip-nx-cache --include='**/calendar-date.adapter.spec.ts'`
 Expected: PASS. A `Date`-based adapter renders `2026-10-05` here and
 passes under UTC, which is exactly why this run exists.
 
@@ -2081,7 +2083,7 @@ and add it as the last entry in the `providers` array:
 Temporarily change `getMonth` to `return parts(date).month;`, dropping the
 `- 1`.
 
-Run: `npx nx test web -- calendar-date.adapter`
+Run: `npx nx test web --include='**/calendar-date.adapter.spec.ts'`
 Expected: FAIL on the zero-based month assertions.
 
 Restore it, then temporarily change `createDate` to call
@@ -2225,7 +2227,7 @@ describe('errorMessage', () => {
 
 - [ ] **Step 2: Run the test to verify it fails**
 
-Run: `npx nx test web -- api-error`
+Run: `npx nx test web --include='**/api-error.spec.ts'`
 Expected: FAIL — cannot resolve `./api-error`.
 
 - [ ] **Step 3: Write the constants, the context token, and the error helper**
@@ -2310,7 +2312,7 @@ export function errorMessage(error: unknown): string {
 
 - [ ] **Step 4: Run the test to verify it passes**
 
-Run: `npx nx test web -- api-error`
+Run: `npx nx test web --include='**/api-error.spec.ts'`
 Expected: PASS.
 
 - [ ] **Step 5: Write the failing client test**
@@ -2545,7 +2547,7 @@ describe('BillInstancesApi', () => {
 
 - [ ] **Step 6: Run the test to verify it fails**
 
-Run: `npx nx test web -- api-clients`
+Run: `npx nx test web --include='**/api-clients.spec.ts'`
 Expected: FAIL — none of the client modules resolve.
 
 - [ ] **Step 7: Write the clients**
@@ -2793,14 +2795,14 @@ export class BillInstancesApi {
 
 - [ ] **Step 8: Run the test to verify it passes**
 
-Run: `npx nx test web -- api-clients`
+Run: `npx nx test web --include='**/api-clients.spec.ts'`
 Expected: PASS.
 
 - [ ] **Step 9: Prove the two falsy-parameter tests can fail**
 
 Temporarily change `BillsApi.list` to `isActive ? params.set(...) : new HttpParams()`.
 
-Run: `npx nx test web -- api-clients`
+Run: `npx nx test web --include='**/api-clients.spec.ts'`
 Expected: FAIL on "sends isActive=false, not an omitted parameter".
 
 Restore it, then make the same change to `overdue` in `BillInstancesApi.list`.
@@ -3052,7 +3054,7 @@ describe('clear and signOut', () => {
 
 - [ ] **Step 2: Run the test to verify it fails**
 
-Run: `npx nx test web -- session.service`
+Run: `npx nx test web --include='**/session.service.spec.ts'`
 Expected: FAIL — cannot resolve `./session.service`.
 
 - [ ] **Step 3: Write the session service**
@@ -3180,7 +3182,7 @@ export class SessionService {
 
 - [ ] **Step 4: Run the test to verify it passes**
 
-Run: `npx nx test web -- session.service`
+Run: `npx nx test web --include='**/session.service.spec.ts'`
 Expected: PASS.
 
 - [ ] **Step 5: Write the failing interceptor test**
@@ -3398,7 +3400,7 @@ describe('a refresh that fails mid-session', () => {
 
 - [ ] **Step 6: Run the test to verify it fails**
 
-Run: `npx nx test web -- auth.interceptor`
+Run: `npx nx test web --include='**/auth.interceptor.spec.ts'`
 Expected: FAIL — cannot resolve `./auth.interceptor`.
 
 - [ ] **Step 7: Write the interceptor**
@@ -3487,7 +3489,7 @@ export const authInterceptor: HttpInterceptorFn = (request, next) => {
 
 - [ ] **Step 8: Run the test to verify it passes**
 
-Run: `npx nx test web -- auth.interceptor`
+Run: `npx nx test web --include='**/auth.interceptor.spec.ts'`
 Expected: PASS.
 
 - [ ] **Step 9: Prove the single-flight assertion can fail**
@@ -3496,7 +3498,7 @@ Temporarily change `SessionService.refresh()` to drop the cache — delete
 the `if (this.inFlightRefresh) return this.inFlightRefresh;` line and the
 `this.inFlightRefresh = shared;` assignment.
 
-Run: `npx nx test web -- auth.interceptor session.service`
+Run: `npx nx test web`
 Expected: FAIL on "refreshes once for several simultaneous 401s" (three
 refreshes, not one) and on the session service's own single-flight test.
 
@@ -3507,7 +3509,7 @@ interceptor suite would pass just as happily against a stampede.
 
 Temporarily move the inner `catchError` to *after* the `switchMap`.
 
-Run: `npx nx test web -- auth.interceptor`
+Run: `npx nx test web --include='**/auth.interceptor.spec.ts'`
 Expected: FAIL on "surfaces the error instead of refreshing again when the
 retry also fails with 401" — the retry's 401 now clears the session and
 navigates, which that test does not expect.
@@ -3610,7 +3612,7 @@ describe('guestGuard', () => {
 
 - [ ] **Step 12: Run the test to verify it fails**
 
-Run: `npx nx test web -- auth.guard`
+Run: `npx nx test web --include='**/auth.guard.spec.ts'`
 Expected: FAIL — cannot resolve `./auth.guard`.
 
 - [ ] **Step 13: Write the guards**
@@ -3645,7 +3647,7 @@ export const guestGuard: CanActivateFn = () => {
 
 - [ ] **Step 14: Run the test to verify it passes**
 
-Run: `npx nx test web -- auth.guard`
+Run: `npx nx test web --include='**/auth.guard.spec.ts'`
 Expected: PASS.
 
 - [ ] **Step 15: Wire the interceptor and the initializer into the application**
@@ -3775,7 +3777,7 @@ describe('amountValidators', () => {
 
 - [ ] **Step 2: Run the test to verify it fails**
 
-Run: `npx nx test web -- money`
+Run: `npx nx test web --include='**/money.spec.ts'`
 Expected: FAIL — cannot resolve `./money`.
 
 - [ ] **Step 3: Write the money module**
@@ -3817,7 +3819,7 @@ export const amountValidators: ValidatorFn[] = [
 
 - [ ] **Step 4: Run the test to verify it passes**
 
-Run: `npx nx test web -- money`
+Run: `npx nx test web --include='**/money.spec.ts'`
 Expected: PASS.
 
 - [ ] **Step 5: Write the failing server-errors test**
@@ -3942,7 +3944,7 @@ describe('applyServerErrors', () => {
 
 - [ ] **Step 6: Run the test to verify it fails**
 
-Run: `npx nx test web -- server-errors`
+Run: `npx nx test web --include='**/server-errors.spec.ts'`
 Expected: FAIL — cannot resolve `./server-errors`.
 
 - [ ] **Step 7: Write the server-errors mapper**
@@ -3992,7 +3994,7 @@ export function applyServerErrors(form: FormGroup, error: unknown): string[] {
 
 - [ ] **Step 8: Run the test to verify it passes**
 
-Run: `npx nx test web -- server-errors`
+Run: `npx nx test web --include='**/server-errors.spec.ts'`
 Expected: PASS.
 
 - [ ] **Step 9: Write the failing field-errors test**
@@ -4082,7 +4084,7 @@ describe('FieldErrorsComponent', () => {
 
 - [ ] **Step 10: Run the test to verify it fails**
 
-Run: `npx nx test web -- field-errors`
+Run: `npx nx test web --include='**/field-errors.component.spec.ts'`
 Expected: FAIL — cannot resolve `./field-errors.component`.
 
 - [ ] **Step 11: Write the field-errors component**
@@ -4147,7 +4149,7 @@ export class FieldErrorsComponent {
 
 - [ ] **Step 12: Run the test to verify it passes**
 
-Run: `npx nx test web -- field-errors`
+Run: `npx nx test web --include='**/field-errors.component.spec.ts'`
 Expected: PASS.
 
 - [ ] **Step 13: Write the empty state and the notification service**
@@ -4321,7 +4323,7 @@ describe('ConfirmDialogComponent', () => {
 
 - [ ] **Step 15: Run the test to verify it fails**
 
-Run: `npx nx test web -- confirm-dialog`
+Run: `npx nx test web --include='**/confirm-dialog.component.spec.ts'`
 Expected: FAIL — cannot resolve `./confirm-dialog.component`.
 
 - [ ] **Step 16: Write the confirm dialog**
@@ -4392,7 +4394,7 @@ export class ConfirmDialogComponent {
 
 - [ ] **Step 17: Run the test to verify it passes**
 
-Run: `npx nx test web -- confirm-dialog`
+Run: `npx nx test web --include='**/confirm-dialog.component.spec.ts'`
 Expected: PASS.
 
 - [ ] **Step 18: Prove the unmatched-message path is tested**
@@ -4400,7 +4402,7 @@ Expected: PASS.
 Temporarily change `applyServerErrors` so the `control === null` branch
 does `continue` without pushing to `unmatched`.
 
-Run: `npx nx test web -- server-errors`
+Run: `npx nx test web --include='**/server-errors.spec.ts'`
 Expected: FAIL on both unmatched-message tests.
 
 Restore and re-run. Expected: PASS. This is the silent-rejection failure
@@ -4536,7 +4538,7 @@ describe('safeReturnUrl', () => {
 
 - [ ] **Step 2: Run both to verify they fail**
 
-Run: `npx nx test web -- password-validators return-url`
+Run: `npx nx test web`
 Expected: FAIL — neither module resolves.
 
 - [ ] **Step 3: Write both modules**
@@ -4590,7 +4592,7 @@ export function safeReturnUrl(value: unknown, fallback: string): string {
 
 - [ ] **Step 4: Run both to verify they pass**
 
-Run: `npx nx test web -- password-validators return-url`
+Run: `npx nx test web`
 Expected: PASS.
 
 - [ ] **Step 5: Write the failing login test**
@@ -4780,7 +4782,7 @@ describe('LoginComponent and an expired session', () => {
 
 - [ ] **Step 6: Run the test to verify it fails**
 
-Run: `npx nx test web -- login.component`
+Run: `npx nx test web --include='**/login.component.spec.ts'`
 Expected: FAIL — cannot resolve `./login.component`.
 
 - [ ] **Step 7: Write the login component**
@@ -4929,7 +4931,7 @@ export class LoginComponent {
 
 - [ ] **Step 8: Run the test to verify it passes**
 
-Run: `npx nx test web -- login.component`
+Run: `npx nx test web --include='**/login.component.spec.ts'`
 Expected: PASS.
 
 - [ ] **Step 9: Write the failing register test**
@@ -5045,7 +5047,7 @@ describe('RegisterComponent', () => {
 
 - [ ] **Step 10: Run the test to verify it fails**
 
-Run: `npx nx test web -- register.component`
+Run: `npx nx test web --include='**/register.component.spec.ts'`
 Expected: FAIL — cannot resolve `./register.component`.
 
 - [ ] **Step 11: Write the register component**
@@ -5197,7 +5199,7 @@ export class RegisterComponent {
 
 - [ ] **Step 12: Run the test to verify it passes**
 
-Run: `npx nx test web -- register.component`
+Run: `npx nx test web --include='**/register.component.spec.ts'`
 Expected: PASS.
 
 - [ ] **Step 13: Write the failing shell test**
@@ -5286,7 +5288,7 @@ describe('ShellComponent', () => {
 
 - [ ] **Step 14: Run the test to verify it fails**
 
-Run: `npx nx test web -- shell.component`
+Run: `npx nx test web --include='**/shell.component.spec.ts'`
 Expected: FAIL — cannot resolve `./shell.component`.
 
 - [ ] **Step 15: Write the shell and the not-found screen**
@@ -5424,7 +5426,7 @@ export class NotFoundComponent {}
 
 - [ ] **Step 16: Run the test to verify it passes**
 
-Run: `npx nx test web -- shell.component`
+Run: `npx nx test web --include='**/shell.component.spec.ts'`
 Expected: PASS.
 
 - [ ] **Step 17: Write the route table**
@@ -5569,7 +5571,7 @@ Temporarily change `LoginComponent.submit()` to navigate to
 `this.route.snapshot.queryParams['returnUrl'] ?? '/upcoming'`, bypassing
 `safeReturnUrl`.
 
-Run: `npx nx test web -- login.component`
+Run: `npx nx test web --include='**/login.component.spec.ts'`
 Expected: FAIL on "refuses to follow a returnUrl that leaves the site".
 
 Restore and re-run. Expected: PASS.
@@ -5835,7 +5837,7 @@ describe('session lifecycle', () => {
 
 - [ ] **Step 2: Run the test to verify it fails**
 
-Run: `npx nx test web -- categories.store`
+Run: `npx nx test web --include='**/categories.store.spec.ts'`
 Expected: FAIL — cannot resolve `./categories.store`.
 
 - [ ] **Step 3: Write the store**
@@ -5940,7 +5942,7 @@ export class CategoriesStore {
 
 - [ ] **Step 4: Run the test to verify it passes**
 
-Run: `npx nx test web -- categories.store`
+Run: `npx nx test web --include='**/categories.store.spec.ts'`
 Expected: PASS.
 
 - [ ] **Step 5: Write the failing screen test**
@@ -6051,7 +6053,7 @@ describe('CategoriesComponent', () => {
 
 - [ ] **Step 6: Run the test to verify it fails**
 
-Run: `npx nx test web -- categories.component`
+Run: `npx nx test web --include='**/categories.component.spec.ts'`
 Expected: FAIL — cannot resolve `./categories.component`.
 
 - [ ] **Step 7: Write the dialog and the screen**
@@ -6378,7 +6380,7 @@ describe('the guarded area', () => {
 
 - [ ] **Step 10: Run the test to verify it passes**
 
-Run: `npx nx test web -- categories app.spec`
+Run: `npx nx test web`
 Expected: PASS, the store suite, the component suite, and the routing
 suite.
 
@@ -6386,7 +6388,7 @@ suite.
 
 Temporarily change `isEmpty` to `computed(() => this.items().length === 0)`.
 
-Run: `npx nx test web -- categories`
+Run: `npx nx test web`
 Expected: FAIL on "does not report emptiness before the first load has
 finished" and on "shows no empty state while the first load is still in
 flight".
@@ -6479,7 +6481,7 @@ describe('endDateAfterStart', () => {
 
 - [ ] **Step 2: Run the test to verify it fails**
 
-Run: `npx nx test web -- date-range.validator`
+Run: `npx nx test web --include='**/date-range.validator.spec.ts'`
 Expected: FAIL — cannot resolve `./date-range.validator`.
 
 - [ ] **Step 3: Write the validator**
@@ -6511,7 +6513,7 @@ export const endDateAfterStart: ValidatorFn = (
 
 - [ ] **Step 4: Run the test to verify it passes**
 
-Run: `npx nx test web -- date-range.validator`
+Run: `npx nx test web --include='**/date-range.validator.spec.ts'`
 Expected: PASS.
 
 - [ ] **Step 5: Write the failing store test**
@@ -6681,7 +6683,7 @@ describe('session lifecycle', () => {
 
 - [ ] **Step 6: Run the test to verify it fails**
 
-Run: `npx nx test web -- bills.store`
+Run: `npx nx test web --include='**/bills.store.spec.ts'`
 Expected: FAIL — cannot resolve `./bills.store`.
 
 - [ ] **Step 7: Write the store**
@@ -6792,7 +6794,7 @@ watcher that had already seen a higher value.
 
 - [ ] **Step 8: Run the test to verify it passes**
 
-Run: `npx nx test web -- bills.store`
+Run: `npx nx test web --include='**/bills.store.spec.ts'`
 Expected: PASS.
 
 - [ ] **Step 9: Write the failing list test**
@@ -6944,7 +6946,7 @@ describe('BillsComponent', () => {
 
 - [ ] **Step 10: Run the test to verify it fails**
 
-Run: `npx nx test web -- bills.component`
+Run: `npx nx test web --include='**/bills.component.spec.ts'`
 Expected: FAIL — cannot resolve `./bills.component`.
 
 - [ ] **Step 11: Write the list screen**
@@ -7398,7 +7400,7 @@ describe('editing', () => {
 
 - [ ] **Step 13: Run the test to verify it fails**
 
-Run: `npx nx test web -- bill-form`
+Run: `npx nx test web --include='**/bill-form.component.spec.ts'`
 Expected: FAIL — cannot resolve `./bill-form.component`.
 
 - [ ] **Step 14: Write the form**
@@ -7669,7 +7671,7 @@ declared before `bills/:id`:
 
 - [ ] **Step 16: Run the tests to verify they pass**
 
-Run: `npx nx test web -- bills bill-form date-range`
+Run: `npx nx test web`
 Expected: PASS.
 
 - [ ] **Step 17: Prove the deactivate-first dialog is tested**
@@ -7677,7 +7679,7 @@ Expected: PASS.
 Temporarily remove `alternateLabel: 'Deactivate instead'` from the dialog
 data in `BillsComponent.confirmRemove`.
 
-Run: `npx nx test web -- bills.component`
+Run: `npx nx test web --include='**/bills.component.spec.ts'`
 Expected: FAIL on "offers deactivation as the default action when
 deleting" and on "deactivates rather than deleting when the alternate
 action is chosen".
@@ -7995,7 +7997,7 @@ describe('session lifecycle', () => {
 
 - [ ] **Step 2: Run the test to verify it fails**
 
-Run: `npx nx test web -- instances.store`
+Run: `npx nx test web --include='**/instances.store.spec.ts'`
 Expected: FAIL — cannot resolve `./instances.store`.
 
 - [ ] **Step 3: Write the store**
@@ -8138,7 +8140,7 @@ export class InstancesStore {
 
 - [ ] **Step 4: Run the test to verify it passes**
 
-Run: `npx nx test web -- instances.store`
+Run: `npx nx test web --include='**/instances.store.spec.ts'`
 Expected: PASS.
 
 - [ ] **Step 5: Prove the 400-day boundary is tested on the correct side**
@@ -8149,7 +8151,7 @@ Temporarily change `rangeError` to measure an inclusive day count:
 if (daysBetween(from, to) + 1 > MAX_RANGE_DAYS) {
 ```
 
-Run: `npx nx test web -- instances.store`
+Run: `npx nx test web --include='**/instances.store.spec.ts'`
 Expected: FAIL on "accepts a difference of exactly 400 days".
 
 Restore and re-run. Expected: PASS. The same off-by-one cost sub-project 2
@@ -8348,7 +8350,7 @@ describe('the day boundary', () => {
 
 - [ ] **Step 7: Run the test to verify it fails**
 
-Run: `npx nx test web -- upcoming.component`
+Run: `npx nx test web --include='**/upcoming.component.spec.ts'`
 Expected: FAIL — cannot resolve `./upcoming.component`.
 
 - [ ] **Step 8: Write the row component**
@@ -8651,7 +8653,7 @@ The default redirect from `''` now resolves.
 
 - [ ] **Step 11: Run the tests to verify they pass**
 
-Run: `npx nx test web -- instances upcoming`
+Run: `npx nx test web`
 Expected: PASS.
 
 - [ ] **Step 12: Prove the overdue badge is not derived locally**
@@ -8661,7 +8663,7 @@ replace `@if (instance().isOverdue)` with
 `@if (instance().status !== 'PAID' && instance().dueDate < todayValue)`,
 adding `protected readonly todayValue = today();` and the import.
 
-Run: `npx nx test web -- upcoming.component`
+Run: `npx nx test web --include='**/upcoming.component.spec.ts'`
 Expected: FAIL on both "overdue comes from the server" tests — the future
 due date loses its badge and the ancient one gains it.
 
@@ -8669,8 +8671,8 @@ Restore and re-run. Expected: PASS.
 
 - [ ] **Step 13: Run the suite under two extreme time zones**
 
-Run: `TZ=Pacific/Kiritimati npx nx test web`
-Then: `TZ=Pacific/Pago_Pago npx nx test web`
+Run: `TZ=Pacific/Kiritimati npx nx test web --skip-nx-cache`
+Then: `TZ=Pacific/Pago_Pago npx nx test web --skip-nx-cache`
 
 Expected: PASS in both. These are UTC+14 and UTC-11 — a 25-hour spread,
 so any place the client derived a date locally shows up as a failure in
@@ -8882,7 +8884,7 @@ describe('history and reload', () => {
 
 - [ ] **Step 2: Run the test to verify it fails**
 
-Run: `npx nx test web -- payments.service`
+Run: `npx nx test web --include='**/payments.service.spec.ts'`
 Expected: FAIL — cannot resolve `./payments.service`.
 
 - [ ] **Step 3: Write the service**
@@ -8955,7 +8957,7 @@ export class PaymentsService {
 
 - [ ] **Step 4: Run the test to verify it passes**
 
-Run: `npx nx test web -- payments.service`
+Run: `npx nx test web --include='**/payments.service.spec.ts'`
 Expected: PASS.
 
 - [ ] **Step 5: Write the failing payment-dialog test**
@@ -9061,7 +9063,7 @@ describe('PaymentDialogComponent', () => {
 
 - [ ] **Step 6: Run the test to verify it fails**
 
-Run: `npx nx test web -- payment-dialog`
+Run: `npx nx test web --include='**/payment-dialog.component.spec.ts'`
 Expected: FAIL — cannot resolve `./payment-dialog.component`.
 
 - [ ] **Step 7: Write the payment dialog**
@@ -9189,7 +9191,7 @@ export class PaymentDialogComponent {
 
 - [ ] **Step 8: Run the test to verify it passes**
 
-Run: `npx nx test web -- payment-dialog`
+Run: `npx nx test web --include='**/payment-dialog.component.spec.ts'`
 Expected: PASS.
 
 - [ ] **Step 9: Write the failing history test**
@@ -9338,7 +9340,7 @@ describe('PaymentHistoryComponent', () => {
 
 - [ ] **Step 10: Run the test to verify it fails**
 
-Run: `npx nx test web -- payment-history`
+Run: `npx nx test web --include='**/payment-history.component.spec.ts'`
 Expected: FAIL — cannot resolve `./payment-history.component`.
 
 - [ ] **Step 11: Write the history component**
@@ -9474,7 +9476,7 @@ export class PaymentHistoryComponent {
 
 - [ ] **Step 12: Run the test to verify it passes**
 
-Run: `npx nx test web -- payment-history`
+Run: `npx nx test web --include='**/payment-history.component.spec.ts'`
 Expected: PASS.
 
 - [ ] **Step 13: Wire the actions into the upcoming screen**
@@ -9708,7 +9710,7 @@ this.dialogRef.close({ amount, note: note === '' ? null : note });
 
 and change `PaymentsService.record` to compute the balance itself. Run:
 
-`npx nx test web -- payments.service`
+`npx nx test web --include='**/payments.service.spec.ts'`
 
 Expected: FAIL on "sends an empty body for a full payment and patches the
 row from the response".
@@ -9900,7 +9902,7 @@ describe('the password form', () => {
 
 - [ ] **Step 2: Run the test to verify it fails**
 
-Run: `npx nx test web -- settings.component`
+Run: `npx nx test web --include='**/settings.component.spec.ts'`
 Expected: FAIL — cannot resolve `./settings.component`.
 
 - [ ] **Step 3: Write the screen**
@@ -10101,7 +10103,7 @@ In `apps/web/src/app/app.routes.ts`, add to the shell route's `children`:
 
 - [ ] **Step 5: Run the test to verify it passes**
 
-Run: `npx nx test web -- settings.component`
+Run: `npx nx test web --include='**/settings.component.spec.ts'`
 Expected: PASS.
 
 - [ ] **Step 6: Verify the whole workspace**
