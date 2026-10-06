@@ -63,7 +63,6 @@
     "libs/*"
   ],
   "dependencies": {
-    "@angular/animations": "22.2.1",
     "@angular/cdk": "22.2.1",
     "@angular/common": "22.2.1",
     "@angular/compiler": "22.2.1",

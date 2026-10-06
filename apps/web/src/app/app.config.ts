@@ -9,7 +9,6 @@ import {
   withFetch,
   withInterceptors,
 } from '@angular/common/http';
-import { provideAnimationsAsync } from '@angular/platform-browser/animations/async';
 import { routes } from './app.routes';
 
 export const appConfig: ApplicationConfig = {
@@ -18,6 +17,5 @@ export const appConfig: ApplicationConfig = {
     provideZonelessChangeDetection(),
     provideRouter(routes, withComponentInputBinding()),
     provideHttpClient(withFetch(), withInterceptors([])),
-    provideAnimationsAsync(),
   ],
 };

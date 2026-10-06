@@ -1,7 +1,7 @@
 import { TestBed } from '@angular/core/testing';
 import { provideZonelessChangeDetection } from '@angular/core';
 import { provideRouter } from '@angular/router';
-import { provideAnimationsAsync } from '@angular/platform-browser/animations/async';
+import { MATERIAL_ANIMATIONS } from '@angular/material/core';
 import { describe, expect, it } from 'vitest';
 import { BILL_FREQUENCIES } from '@bill-tracker/shared-types';
 import { App } from './app';
@@ -13,7 +13,10 @@ describe('App', () => {
       providers: [
         provideZonelessChangeDetection(),
         provideRouter([]),
-        provideAnimationsAsync('noop'),
+        {
+          provide: MATERIAL_ANIMATIONS,
+          useValue: { animationsDisabled: true },
+        },
       ],
     }).compileComponents();
 
