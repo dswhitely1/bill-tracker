@@ -6005,6 +6005,12 @@ describe('CategoriesComponent', () => {
 
     http.expectOne('/api/categories').flush([utilities]);
     await fixture.whenStable();
+    // Twice: the store resumes its `load()` one microtask after
+    // `flush()` returns, because `firstValueFrom` wraps the
+    // response in a native promise. The first `whenStable()` can
+    // settle before that continuation runs; the second observes
+    // the render it produced.
+    await fixture.whenStable();
 
     expect(fixture.nativeElement.textContent).toContain('Utilities');
   });
@@ -6016,6 +6022,7 @@ describe('CategoriesComponent', () => {
     await fixture.whenStable();
 
     http.expectOne('/api/categories').flush([]);
+    await fixture.whenStable();
     await fixture.whenStable();
 
     expect(fixture.nativeElement.textContent).toContain('No categories yet');
@@ -6037,6 +6044,7 @@ describe('CategoriesComponent', () => {
 
     http.expectOne('/api/categories').flush(null, { status: 500, statusText: 'Server Error' });
     await fixture.whenStable();
+    await fixture.whenStable();
 
     expect(fixture.nativeElement.textContent).toContain('Something went wrong');
     expect(fixture.nativeElement.textContent).not.toContain('No categories yet');
@@ -6048,6 +6056,7 @@ describe('CategoriesComponent', () => {
     const fixture = TestBed.createComponent(CategoriesComponent);
     await fixture.whenStable();
     http.expectOne('/api/categories').flush([utilities]);
+    await fixture.whenStable();
     await fixture.whenStable();
 
     await fixture.componentInstance.confirmRemove(utilities);
@@ -6873,6 +6882,12 @@ describe('BillsComponent', () => {
     await fixture.whenStable();
     flushInitialLoads();
     await fixture.whenStable();
+    // Twice: the store resumes its `load()` one microtask after
+    // `flush()` returns, because `firstValueFrom` wraps the
+    // response in a native promise. The first `whenStable()` can
+    // settle before that continuation runs; the second observes
+    // the render it produced.
+    await fixture.whenStable();
 
     const text = fixture.nativeElement.textContent;
     expect(text).toContain('Rent');
@@ -6886,6 +6901,7 @@ describe('BillsComponent', () => {
     await fixture.whenStable();
     flushInitialLoads([{ ...rent, isActive: false }]);
     await fixture.whenStable();
+    await fixture.whenStable();
 
     expect(fixture.nativeElement.textContent).toContain('Inactive');
   });
@@ -6894,6 +6910,7 @@ describe('BillsComponent', () => {
     const fixture = TestBed.createComponent(BillsComponent);
     await fixture.whenStable();
     flushInitialLoads([]);
+    await fixture.whenStable();
     await fixture.whenStable();
 
     expect(fixture.nativeElement.textContent).toContain('No bills yet');
@@ -6910,6 +6927,7 @@ describe('BillsComponent', () => {
     const fixture = TestBed.createComponent(BillsComponent);
     await fixture.whenStable();
     flushInitialLoads();
+    await fixture.whenStable();
     await fixture.whenStable();
 
     await fixture.componentInstance.confirmRemove(rent);
@@ -6928,6 +6946,7 @@ describe('BillsComponent', () => {
     await fixture.whenStable();
     flushInitialLoads();
     await fixture.whenStable();
+    await fixture.whenStable();
 
     const done = fixture.componentInstance.confirmRemove(rent);
     const req = http.expectOne('/api/bills/bill-1');
@@ -6945,6 +6964,7 @@ describe('BillsComponent', () => {
     const fixture = TestBed.createComponent(BillsComponent);
     await fixture.whenStable();
     flushInitialLoads();
+    await fixture.whenStable();
     await fixture.whenStable();
 
     const done = fixture.componentInstance.confirmRemove(rent);
@@ -7234,6 +7254,12 @@ describe('creating', () => {
     await fixture.whenStable();
     http.expectOne('/api/categories').flush([]);
     await fixture.whenStable();
+    // Twice: the store resumes its `load()` one microtask after
+    // `flush()` returns, because `firstValueFrom` wraps the
+    // response in a native promise. The first `whenStable()` can
+    // settle before that continuation runs; the second observes
+    // the render it produced.
+    await fixture.whenStable();
 
     fixture.componentInstance.form.patchValue({
       name: 'Water',
@@ -7254,6 +7280,7 @@ describe('creating', () => {
     });
     req.flush({ ...rent, id: 'bill-2', name: 'Water' });
     await fixture.whenStable();
+    await fixture.whenStable();
 
     expect(navigate).toHaveBeenCalledWith('/bills');
   });
@@ -7262,6 +7289,7 @@ describe('creating', () => {
     const fixture = TestBed.createComponent(BillFormComponent);
     await fixture.whenStable();
     http.expectOne('/api/categories').flush([]);
+    await fixture.whenStable();
     await fixture.whenStable();
 
     fixture.componentInstance.form.patchValue({
@@ -7283,6 +7311,7 @@ describe('creating', () => {
     await fixture.whenStable();
     http.expectOne('/api/categories').flush([]);
     await fixture.whenStable();
+    await fixture.whenStable();
 
     fixture.componentInstance.form.patchValue({
       name: 'Water',
@@ -7301,6 +7330,7 @@ describe('creating', () => {
     const fixture = TestBed.createComponent(BillFormComponent);
     await fixture.whenStable();
     http.expectOne('/api/categories').flush([]);
+    await fixture.whenStable();
     await fixture.whenStable();
 
     fixture.componentInstance.form.patchValue({
@@ -7330,6 +7360,7 @@ describe('creating', () => {
     await fixture.whenStable();
     http.expectOne('/api/categories').flush([]);
     await fixture.whenStable();
+    await fixture.whenStable();
 
     fixture.componentInstance.form.patchValue({
       name: 'Water',
@@ -7342,6 +7373,7 @@ describe('creating', () => {
     http
       .expectOne((r) => r.method === 'POST')
       .flush({ message: 'Category not found' }, { status: 400, statusText: 'Bad Request' });
+    await fixture.whenStable();
     await fixture.whenStable();
 
     expect(fixture.nativeElement.textContent).toContain('Category not found');
@@ -7356,6 +7388,7 @@ describe('editing', () => {
     await fixture.whenStable();
     http.expectOne('/api/categories').flush([]);
     http.expectOne('/api/bills/bill-1').flush(rent);
+    await fixture.whenStable();
     await fixture.whenStable();
 
     expect(fixture.componentInstance.form.getRawValue()).toMatchObject({
@@ -7373,6 +7406,7 @@ describe('editing', () => {
     http.expectOne('/api/categories').flush([]);
     http.expectOne('/api/bills/bill-1').flush(rent);
     await fixture.whenStable();
+    await fixture.whenStable();
 
     expect(fixture.nativeElement.textContent).toContain('future');
     expect(fixture.nativeElement.textContent).toContain('unpaid');
@@ -7385,6 +7419,7 @@ describe('editing', () => {
     await fixture.whenStable();
     http.expectOne('/api/categories').flush([]);
     await fixture.whenStable();
+    await fixture.whenStable();
 
     expect(fixture.nativeElement.textContent).not.toContain('untouched');
   });
@@ -7396,6 +7431,7 @@ describe('editing', () => {
     http.expectOne('/api/categories').flush([]);
     http.expectOne('/api/bills/bill-1').flush(rent);
     await fixture.whenStable();
+    await fixture.whenStable();
 
     fixture.componentInstance.form.patchValue({ defaultAmount: 1300 });
     fixture.componentInstance.submit();
@@ -7403,6 +7439,7 @@ describe('editing', () => {
     const req = http.expectOne((r) => r.url === '/api/bills/bill-1' && r.method === 'PATCH');
     expect(req.request.body.defaultAmount).toBe(1300);
     req.flush({ ...rent, defaultAmount: 1300 });
+    await fixture.whenStable();
     await fixture.whenStable();
 
     expect(navigate).toHaveBeenCalledWith('/bills');
@@ -8233,6 +8270,12 @@ describe('UpcomingComponent', () => {
     await fixture.whenStable();
     instancesRequest().flush([base]);
     await fixture.whenStable();
+    // Twice: the store resumes its `load()` one microtask after
+    // `flush()` returns, because `firstValueFrom` wraps the
+    // response in a native promise. The first `whenStable()` can
+    // settle before that continuation runs; the second observes
+    // the render it produced.
+    await fixture.whenStable();
 
     const text = fixture.nativeElement.textContent;
     expect(text).toContain('Rent');
@@ -8256,6 +8299,7 @@ describe('UpcomingComponent', () => {
     const fixture = TestBed.createComponent(UpcomingComponent);
     await fixture.whenStable();
     instancesRequest().flush([]);
+    await fixture.whenStable();
     await fixture.whenStable();
 
     expect(fixture.nativeElement.textContent).toContain('Nothing due in this range');
@@ -8283,6 +8327,7 @@ describe('overdue comes from the server', () => {
     await fixture.whenStable();
     instancesRequest().flush([{ ...base, dueDate: '2099-01-01', isOverdue: true }]);
     await fixture.whenStable();
+    await fixture.whenStable();
 
     expect(fixture.nativeElement.textContent).toContain('Overdue');
   });
@@ -8291,6 +8336,7 @@ describe('overdue comes from the server', () => {
     const fixture = TestBed.createComponent(UpcomingComponent);
     await fixture.whenStable();
     instancesRequest().flush([{ ...base, dueDate: '2000-01-01', isOverdue: false }]);
+    await fixture.whenStable();
     await fixture.whenStable();
 
     expect(fixture.nativeElement.textContent).not.toContain('Overdue');
@@ -8302,6 +8348,7 @@ describe('the range controls', () => {
     const fixture = TestBed.createComponent(UpcomingComponent);
     await fixture.whenStable();
     instancesRequest().flush([base]);
+    await fixture.whenStable();
     await fixture.whenStable();
 
     fixture.componentInstance.rangeForm.setValue({ from: '2026-01-01', to: '2027-06-01' });
@@ -8317,6 +8364,7 @@ describe('the range controls', () => {
     const fixture = TestBed.createComponent(UpcomingComponent);
     await fixture.whenStable();
     instancesRequest().flush([]);
+    await fixture.whenStable();
     await fixture.whenStable();
 
     fixture.componentInstance.rangeForm.setValue({ from: '2026-11-01', to: '2026-11-30' });
@@ -8336,6 +8384,7 @@ describe('the day boundary', () => {
     await fixture.whenStable();
     instancesRequest().flush([base]);
     await fixture.whenStable();
+    await fixture.whenStable();
 
     const renderedOn = fixture.componentInstance.renderedOn();
     fixture.componentInstance.refreshIfDayChanged('2099-01-01');
@@ -8350,6 +8399,7 @@ describe('the day boundary', () => {
     const fixture = TestBed.createComponent(UpcomingComponent);
     await fixture.whenStable();
     instancesRequest().flush([base]);
+    await fixture.whenStable();
     await fixture.whenStable();
 
     fixture.componentInstance.refreshIfDayChanged(fixture.componentInstance.renderedOn());
@@ -9275,6 +9325,12 @@ describe('PaymentHistoryComponent', () => {
     await fixture.whenStable();
     http.expectOne('/api/bill-instances/inst-1/payments').flush([paid]);
     await fixture.whenStable();
+    // Twice: the store resumes its `load()` one microtask after
+    // `flush()` returns, because `firstValueFrom` wraps the
+    // response in a native promise. The first `whenStable()` can
+    // settle before that continuation runs; the second observes
+    // the render it produced.
+    await fixture.whenStable();
 
     expect(fixture.nativeElement.textContent).toContain('$1,200.00');
     expect(fixture.nativeElement.textContent).toContain('Bank transfer');
@@ -9286,6 +9342,7 @@ describe('PaymentHistoryComponent', () => {
     const fixture = render();
     await fixture.whenStable();
     http.expectOne('/api/bill-instances/inst-1/payments').flush([paid, reversal]);
+    await fixture.whenStable();
     await fixture.whenStable();
 
     const text = fixture.nativeElement.textContent;
@@ -9299,6 +9356,7 @@ describe('PaymentHistoryComponent', () => {
     await fixture.whenStable();
     http.expectOne('/api/bill-instances/inst-1/payments').flush([paid, reversal]);
     await fixture.whenStable();
+    await fixture.whenStable();
 
     const buttons = fixture.nativeElement.querySelectorAll('[data-testid="reverse"]');
     expect(buttons).toHaveLength(1);
@@ -9309,6 +9367,7 @@ describe('PaymentHistoryComponent', () => {
     await fixture.whenStable();
     http.expectOne('/api/bill-instances/inst-1/payments').flush([]);
     await fixture.whenStable();
+    await fixture.whenStable();
 
     expect(fixture.nativeElement.textContent).toContain('No payments recorded');
   });
@@ -9317,6 +9376,7 @@ describe('PaymentHistoryComponent', () => {
     const fixture = render();
     await fixture.whenStable();
     http.expectOne('/api/bill-instances/inst-1/payments').flush([paid]);
+    await fixture.whenStable();
     await fixture.whenStable();
 
     const done = fixture.componentInstance.reverse(paid);
@@ -9342,6 +9402,7 @@ describe('PaymentHistoryComponent', () => {
     });
     http.expectOne('/api/bill-instances/inst-1/payments').flush([paid, reversal]);
     await done;
+    await fixture.whenStable();
     await fixture.whenStable();
 
     expect(fixture.componentInstance.error()).toContain('already been reversed');
@@ -9655,12 +9716,14 @@ describe('payment actions', () => {
     await fixture.whenStable();
     instancesRequest().flush([base]);
     await fixture.whenStable();
+    await fixture.whenStable();
 
     const done = fixture.componentInstance.openPayment(base);
     const req = http.expectOne('/api/bill-instances/inst-1/payments');
     expect(req.request.body).toEqual({ note: null });
     req.flush({ instance: { ...base, status: 'PAID', amountPaid: 1200 }, payment });
     await done;
+    await fixture.whenStable();
     await fixture.whenStable();
 
     expect(fixture.nativeElement.textContent).toContain('Paid');
@@ -9672,12 +9735,14 @@ describe('payment actions', () => {
     await fixture.whenStable();
     instancesRequest().flush([base]);
     await fixture.whenStable();
+    await fixture.whenStable();
 
     const done = fixture.componentInstance.openPayment(base);
     http
       .expectOne('/api/bill-instances/inst-1/payments')
       .flush({ message: 'Amount exceeds the balance' }, { status: 400, statusText: 'Bad Request' });
     await done;
+    await fixture.whenStable();
     await fixture.whenStable();
 
     expect(fixture.componentInstance.actionError()).toContain('Amount exceeds the balance');
@@ -9689,6 +9754,7 @@ describe('payment actions', () => {
     const fixture = TestBed.createComponent(UpcomingComponent);
     await fixture.whenStable();
     instancesRequest().flush([base]);
+    await fixture.whenStable();
     await fixture.whenStable();
 
     await fixture.componentInstance.openPayment(base);
@@ -9830,6 +9896,12 @@ describe('the profile form', () => {
     expect(req.request.method).toBe('PATCH');
     req.flush({ ...profile, name: 'Ada Lovelace' });
     await fixture.whenStable();
+    // Twice: the store resumes its `load()` one microtask after
+    // `flush()` returns, because `firstValueFrom` wraps the
+    // response in a native promise. The first `whenStable()` can
+    // settle before that continuation runs; the second observes
+    // the render it produced.
+    await fixture.whenStable();
 
     expect(session.user()?.name).toBe('Ada Lovelace');
   });
@@ -9904,6 +9976,7 @@ describe('the password form', () => {
       .expectOne('/api/users/me/password')
       .flush({ message: 'Current password is incorrect' }, { status: 401, statusText: 'Unauthorized' });
     await done;
+    await fixture.whenStable();
     await fixture.whenStable();
 
     expect(session.isAuthenticated()).toBe(true);
