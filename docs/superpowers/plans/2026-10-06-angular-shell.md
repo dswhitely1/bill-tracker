@@ -2364,7 +2364,9 @@ describe('AuthApi', () => {
 
   it('posts to logout', () => {
     TestBed.inject(AuthApi).logout().subscribe();
-    http.expectOne('/api/auth/logout').flush(null);
+    const req = http.expectOne('/api/auth/logout');
+    expect(req.request.method).toBe('POST');
+    req.flush(null);
   });
 });
 
@@ -3312,7 +3314,7 @@ describe('the 401 path', () => {
 
     http.expectOne('/api/bills').flush(null, { status: 500, statusText: 'Server Error' });
 
-    http.expectNone('/api/auth/refresh');
+    expect(http.match('/api/auth/refresh')).toHaveLength(0);
     expect(errors).toHaveLength(1);
   });
 
@@ -3326,7 +3328,7 @@ describe('the 401 path', () => {
     http.expectOne('/api/bills').flush(null, { status: 401, statusText: 'Unauthorized' });
 
     // Exactly one refresh, and the second failure reaches the caller.
-    http.expectNone('/api/auth/refresh');
+    expect(http.match('/api/auth/refresh')).toHaveLength(0);
     expect(errors).toHaveLength(1);
   });
 });
@@ -3355,7 +3357,7 @@ describe('exemptions', () => {
 
     http.expectOne('/api/users/me').flush(null, { status: 401, statusText: 'Unauthorized' });
 
-    http.expectNone('/api/auth/refresh');
+    expect(http.match('/api/auth/refresh')).toHaveLength(0);
     expect(errors).toHaveLength(1);
   });
 });
@@ -4657,7 +4659,7 @@ describe('LoginComponent', () => {
 
     fixture.componentInstance.submit();
 
-    http.expectNone('/api/auth/login');
+    expect(http.match('/api/auth/login')).toHaveLength(0);
   });
 
   it('posts the credentials and signs the session in', async () => {
@@ -5695,7 +5697,7 @@ describe('load', () => {
     await first;
 
     await store.load();
-    http.expectNone('/api/categories');
+    expect(http.match('/api/categories')).toHaveLength(0);
   });
 
   it('refetches when forced', async () => {
@@ -5750,7 +5752,7 @@ describe('mutations', () => {
     await created;
 
     expect(store.categories().map((c) => c.name)).toEqual(['Utilities', 'Insurance']);
-    http.expectNone('/api/categories');
+    expect(http.match('/api/categories')).toHaveLength(0);
   });
 
   it('replaces an updated category in place', async () => {
@@ -7281,7 +7283,7 @@ describe('creating', () => {
     });
     fixture.componentInstance.submit();
 
-    http.expectNone((r) => r.method === 'POST');
+    expect(http.match((r) => r.method === 'POST')).toHaveLength(0);
     expect(fixture.nativeElement.textContent).toContain('end date');
   });
 
@@ -7840,14 +7842,14 @@ describe('setQuery', () => {
     // request go out turns a fixable mistake into a 400.
     await store.setQuery({ from: '2026-01-01', to: '2027-06-01' });
 
-    http.expectNone((r) => r.url === '/api/bill-instances');
+    expect(http.match((r) => r.url === '/api/bill-instances')).toHaveLength(0);
     expect(store.error()).toContain(String(MAX_RANGE_DAYS));
   });
 
   it('refuses a backwards range without sending anything', async () => {
     await store.setQuery({ from: '2026-10-31', to: '2026-10-01' });
 
-    http.expectNone((r) => r.url === '/api/bill-instances');
+    expect(http.match((r) => r.url === '/api/bill-instances')).toHaveLength(0);
     expect(store.error()).toContain('precede');
   });
 
@@ -7909,7 +7911,7 @@ describe('patch', () => {
     expect(store.instances()[0].status).toBe('PAID');
     expect(store.instances()).toHaveLength(1);
     // No follow-up read: the payment endpoints already returned the row.
-    http.expectNone((r) => r.url === '/api/bill-instances');
+    expect(http.match((r) => r.url === '/api/bill-instances')).toHaveLength(0);
   });
 
   it('ignores a row that is not in the current range', async () => {
@@ -7977,7 +7979,7 @@ describe('invalidation by template changes', () => {
     });
     TestBed.tick();
 
-    http.expectNone((r) => r.url === '/api/bill-instances');
+    expect(http.match((r) => r.url === '/api/bill-instances')).toHaveLength(0);
   });
 });
 
@@ -8296,7 +8298,7 @@ describe('the range controls', () => {
     await fixture.componentInstance.applyRange();
     await fixture.whenStable();
 
-    http.expectNone((r) => r.url === '/api/bill-instances');
+    expect(http.match((r) => r.url === '/api/bill-instances')).toHaveLength(0);
     expect(fixture.nativeElement.textContent).toContain('400');
     expect(fixture.nativeElement.textContent).toContain('Rent');
   });
@@ -8343,7 +8345,7 @@ describe('the day boundary', () => {
     fixture.componentInstance.refreshIfDayChanged(fixture.componentInstance.renderedOn());
     await fixture.whenStable();
 
-    http.expectNone((r) => r.url === '/api/bill-instances');
+    expect(http.match((r) => r.url === '/api/bill-instances')).toHaveLength(0);
   });
 });
 ```
@@ -8791,7 +8793,7 @@ describe('record', () => {
 
     expect(instances.instances()[0].status).toBe('PAID');
     // No follow-up read — the endpoint already returned the row.
-    http.expectNone((r) => r.url === '/api/bill-instances');
+    expect(http.match((r) => r.url === '/api/bill-instances')).toHaveLength(0);
   });
 
   it('sends a partial amount when one is given', async () => {
@@ -9681,7 +9683,7 @@ describe('payment actions', () => {
 
     await fixture.componentInstance.openPayment(base);
 
-    http.expectNone('/api/bill-instances/inst-1/payments');
+    expect(http.match('/api/bill-instances/inst-1/payments')).toHaveLength(0);
   });
 });
 ```
@@ -9852,7 +9854,7 @@ describe('the password form', () => {
     });
     fixture.componentInstance.changePassword();
 
-    http.expectNone('/api/users/me/password');
+    expect(http.match('/api/users/me/password')).toHaveLength(0);
   });
 
   it('signs out and sends the person to the login screen on success', async () => {
