@@ -13,13 +13,14 @@
 export function safeReturnUrl(value: unknown, fallback: string): string {
   if (typeof value !== 'string' || value === '') return fallback;
 
-  // URL parsing strips tab, LF and CR from anywhere in a URL and trims
-  // leading C0 controls and spaces, so "/\t/evil.example" is parsed as
-  // "//evil.example" — a protocol-relative URL that the prefix checks
-  // below would otherwise have let through. Normalise to the string a
-  // browser would actually resolve, validate that, and return that:
-  // validating one string and returning another is its own bypass.
-  const url = value.replace(/[\t\n\r]/g, '').replace(/^[ - ]+/, '');
+  // Strip tab, LF and CR anywhere (URL parsing removes them, which can
+  // reveal a "//" prefix: "/\t/evil.example" becomes "//evil.example"),
+  // then trim leading C0 controls and spaces (URL parsing trims those
+  // too). Normalise to the string a browser would actually resolve,
+  // validate that, and return that: validating one string and returning
+  // another is its own bypass.
+  // eslint-disable-next-line no-control-regex -- intentional: the C0 control range mirrors what URL parsing trims.
+  const url = value.replace(/[\t\n\r]/g, '').replace(/^[\x00-\x20]+/, '');
 
   if (url === '' || !url.startsWith('/')) return fallback;
   if (url.startsWith('//') || url.startsWith('/\\')) return fallback;

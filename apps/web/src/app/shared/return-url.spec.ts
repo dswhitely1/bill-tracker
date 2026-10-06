@@ -10,6 +10,12 @@ describe('safeReturnUrl', () => {
     expect(safeReturnUrl('/bills?isActive=true', '/upcoming')).toBe('/bills?isActive=true');
   });
 
+  it('does not touch an interior space in a query string', () => {
+    // The leading-control-character trim is anchored with "^"; it must
+    // never reach past the start of the string.
+    expect(safeReturnUrl('/bills?q=a b', '/upcoming')).toBe('/bills?q=a b');
+  });
+
   it('rejects a protocol-relative URL, which would leave the site', () => {
     // "//evil.example" is a URL, not a path. Navigating to it after a
     // successful sign-in is an open redirect.
@@ -53,5 +59,18 @@ describe('safeReturnUrl', () => {
     // Whatever is returned is what gets navigated to, so it must be the
     // same string that was validated.
     expect(safeReturnUrl('/bi\tlls', '/upcoming')).toBe('/bills');
+  });
+
+  it.each([
+    ['\u0000//evil.example', 'a NUL'],
+    ['\u0001//evil.example', 'a C0 control'],
+    ['\u001f//evil.example', 'the last C0 control'],
+  ])('rejects %j, prefixed by %s', (value) => {
+    // These fail safe via the startsWith('/') check, not the leading-
+    // control-character trim: none of them starts with "/" even before
+    // trimming, so this does not by itself prove the trim works. It pins
+    // the outcome; the corrected character class above is what makes
+    // the claim in that comment true.
+    expect(safeReturnUrl(value, '/upcoming')).toBe('/upcoming');
   });
 });
