@@ -553,8 +553,16 @@ Vitest, through `@angular/build:unit-test`. Covering:
 - `applyServerErrors`, including the unmatched-path banner
 - each store's patch-versus-invalidate behavior from §7.2
 
-Component tests use Angular Material's CDK test harnesses rather than
-querying the DOM, so a Material internal change does not break them.
+Component tests drive a component through its own public surface and
+assert on rendered text and explicit `data-testid` hooks. Angular
+Material's CDK test harnesses are used wherever a test must **operate** a
+Material control rather than read it — the datepicker's input, the payment
+dialog's pay-in-full checkbox and amount field — because those controls
+have internal structure that a DOM query would couple to.
+
+Using harnesses for text assertions as well was considered and rejected:
+it adds an async loader and a harness import to every test in exchange for
+decoupling from markup the tests do not touch.
 
 ### 12.2 End-to-end journeys
 
