@@ -155,4 +155,23 @@ describe('session lifecycle', () => {
 
     expect(store.bills()).toEqual([]);
   });
+
+  it('does not reset the mutations counter when the session ends', async () => {
+    // Task 11 watches this counter to decide whether its range is stale.
+    // Restarting at zero would make a new session look unchanged to a
+    // watcher that had already seen a higher value.
+    await seed();
+    const created = store.create({
+      name: 'Water', defaultAmount: 60, frequency: 'MONTHLY', startDate: '2026-01-01',
+    });
+    http.expectOne((r) => r.url === '/api/bills').flush({ ...rent, id: 'bill-2' });
+    await created;
+    const before = store.mutations();
+
+    session.clear();
+    TestBed.tick();
+
+    expect(store.bills()).toEqual([]);
+    expect(store.mutations()).toBe(before);
+  });
 });

@@ -234,7 +234,8 @@ describe('editing', () => {
     await fixture.whenStable();
     await fixture.whenStable();
 
-    expect(fixture.nativeElement.textContent).not.toContain('untouched');
+    expect(fixture.nativeElement.textContent).not.toContain('future occurrence');
+    expect(fixture.nativeElement.querySelector('.notice')).toBeNull();
   });
 
   it('patches only the bill and returns to the list', async () => {
