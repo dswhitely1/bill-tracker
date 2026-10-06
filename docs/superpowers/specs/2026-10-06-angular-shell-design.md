@@ -315,10 +315,23 @@ settles, so ten simultaneous 401s produce exactly one
 correctness optional; depending on it is still the wrong instinct, and
 single-flighting means the window is never exercised in normal operation.
 
-**A retried request is structurally ineligible for a second retry.** The
-retry carries an `HttpContextToken`, `SKIP_AUTH_RETRY`, which the
-interceptor checks before entering the 401 branch. A boolean guarantee in
-the request itself, rather than a flag someone has to remember to reset.
+**A retried request cannot be retried again**, and the reason is
+structural rather than bookkeeping. The 401 branch lives in a
+`catchError` wrapping `next(req)`; the retry it returns is a *replacement*
+observable, which `catchError` does not re-catch, and `next` is the
+downstream handler rather than a re-entry into this interceptor. A second
+401 therefore propagates to the caller. No counter and no flag is
+involved, and a test asserts exactly this: two sequential 401s produce one
+refresh and one surfaced error.
+
+**`SKIP_AUTH_RETRY`, an `HttpContextToken<boolean>`, is a caller-facing
+opt-out, not the loop guard.** `SessionService.restore()` sets it on its
+`GET /api/users/me` so that a 401 during boot resolves the session as
+anonymous instead of triggering a second refresh behind the initializer's
+back. Keeping that decision in `restore()` — the one place that knows boot
+is in progress — is the point. Note that `HttpContext` is mutable and
+shared across `clone()` by default, so a request's flag survives cloning,
+which is the behavior wanted here.
 
 **When the refresh fails, the session clears and the application
 navigates to `/login`.** Every waiting request fails with the original
@@ -530,8 +543,11 @@ Vitest, through `@angular/build:unit-test`. Covering:
 - every function in `core/date/`, including month-end clamping and the
   timezone cases, run under a non-UTC `TZ` as well as UTC
 - `CalendarDateAdapter`, exhaustively — it is the §8.3 risk
-- the three interceptor rules: single-flight, exemption of `/api/auth/*`,
-  and refusal to retry twice
+- the interceptor's rules: that N concurrent 401s produce exactly one
+  `POST /api/auth/refresh`, that `/api/auth/*` is exempt, that a retried
+  request failing again surfaces its error rather than refreshing a
+  second time, and that a failed refresh clears the session and
+  navigates to `/login`
 - `SessionService.restore()` for both the 200 and the 401 path,
   asserting the 401 path resolves rather than rejects
 - `applyServerErrors`, including the unmatched-path banner
