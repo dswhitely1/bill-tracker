@@ -22,6 +22,7 @@
 - `GET /api/bill-instances` **requires `from` and `to`**, `to >= from`, span at most **400 days**. There is no cursor.
 - A resource belonging to another user returns **404, never 403**. A 401 from a non-auth route can only mean a token problem.
 - Every new file is covered by a test in the same task. Tests are written before the implementation.
+- **`apps/web` enables oxlint's `vitest` plugin.** Two of its rules bite in this plan: `expect-expect` (a test with no `expect()` call fails the build) and `require-mock-type-parameters` (a bare `vi.fn()` fails; write `vi.fn<(a: A) => R>()`). Run `npx nx lint web` as part of verifying a task, not only at the end.
 - **The `web` project's test target rejects positional filters.** It is Angular's `@angular/build:unit-test` builder, so `nx test web -- <pattern>` fails outright; use `--include='**/<name>.spec.ts'`. The `api` project is different — its `@nx/vitest` target does accept positional filters.
 - **`TZ` is not part of the Nx cache key.** Any timezone-sensitive run must pass `--skip-nx-cache`, or a second zone is served from the first zone's cache and proves nothing. When reporting a timezone run, state the offset it actually executed at (`TZ=<zone> date +%z`), not the one intended.
 - Existing API behaviour does not change except as Task 1 specifies. Every existing test stays green.
@@ -4016,7 +4017,9 @@ import { MAX_AMOUNT, MIN_AMOUNT, amountValidators } from './money';
   template: `<app-field-errors [control]="control()" [label]="label()" />`,
 })
 class Host {
-  readonly control = signal(new FormControl('', [Validators.required]));
+  // Annotated: inference would fix this at FormControl<string | null>,
+  // and a later test sets a FormControl<number | null> on it.
+  readonly control = signal<FormControl>(new FormControl('', [Validators.required]));
   readonly label = signal('Name');
 }
 
@@ -4245,10 +4248,16 @@ import { TestBed } from '@angular/core/testing';
 import { MAT_DIALOG_DATA, MatDialogRef } from '@angular/material/dialog';
 import { MATERIAL_ANIMATIONS } from '@angular/material/core';
 import { describe, expect, it, vi } from 'vitest';
-import { ConfirmDialogComponent, ConfirmDialogData } from './confirm-dialog.component';
+import {
+  ConfirmDialogComponent,
+  ConfirmDialogData,
+  ConfirmDialogResult,
+} from './confirm-dialog.component';
 
 function build(data: ConfirmDialogData) {
-  const close = vi.fn();
+  // Typed because apps/web enables oxlint's vitest plugin, and
+  // require-mock-type-parameters rejects a bare vi.fn().
+  const close = vi.fn<(result?: ConfirmDialogResult) => void>();
   TestBed.configureTestingModule({
     imports: [ConfirmDialogComponent],
     providers: [
@@ -8980,7 +8989,7 @@ import { MAT_DIALOG_DATA, MatDialogRef } from '@angular/material/dialog';
 import { MatInputHarness } from '@angular/material/input/testing';
 import { MATERIAL_ANIMATIONS } from '@angular/material/core';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { PaymentDialogComponent } from './payment-dialog.component';
+import { PaymentDialogComponent, PaymentDialogResult } from './payment-dialog.component';
 
 const instance = {
   id: 'inst-1',
@@ -9001,10 +9010,10 @@ const AMOUNT_FIELD = MatInputHarness.with({ selector: 'input[type=number]' });
 
 let fixture: ComponentFixture<PaymentDialogComponent>;
 let loader: HarnessLoader;
-let close: ReturnType<typeof vi.fn>;
+let close: ReturnType<typeof vi.fn<(result?: PaymentDialogResult) => void>>;
 
 beforeEach(async () => {
-  close = vi.fn();
+  close = vi.fn<(result?: PaymentDialogResult) => void>();
   TestBed.configureTestingModule({
     imports: [PaymentDialogComponent],
     providers: [
