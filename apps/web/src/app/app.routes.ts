@@ -53,6 +53,11 @@ export const routes: Routes = [
         loadComponent: () =>
           import('./categories/categories.component').then((m) => m.CategoriesComponent),
       },
+      {
+        path: 'settings',
+        loadComponent: () =>
+          import('./settings/settings.component').then((m) => m.SettingsComponent),
+      },
     ],
   },
   {
