@@ -779,6 +779,7 @@ Replace `apps/web/src/app/app.spec.ts` with:
 import { TestBed } from '@angular/core/testing';
 import { provideZonelessChangeDetection } from '@angular/core';
 import { provideRouter } from '@angular/router';
+import { provideAnimationsAsync } from '@angular/platform-browser/animations/async';
 import { describe, expect, it } from 'vitest';
 import { BILL_FREQUENCIES } from '@bill-tracker/shared-types';
 import { App } from './app';
@@ -787,7 +788,11 @@ describe('App', () => {
   it('renders one Material chip per bill frequency, proving the shared library resolves at runtime', async () => {
     await TestBed.configureTestingModule({
       imports: [App],
-      providers: [provideZonelessChangeDetection(), provideRouter([])],
+      providers: [
+        provideZonelessChangeDetection(),
+        provideRouter([]),
+        provideAnimationsAsync('noop'),
+      ],
     }).compileComponents();
 
     const fixture = TestBed.createComponent(App);
@@ -2827,7 +2832,7 @@ a caller-facing opt-out with exactly one caller, not the loop guard.
 **Interfaces:**
 - Consumes: `AuthApi`, `UsersApi`, `SKIP_AUTH_RETRY`, `API_BASE` (Task 5).
 - Produces:
-  - `SessionService` with `user: Signal<UserProfile | null>`, `isAuthenticated: Signal<boolean>`, `accessToken(): string | null`, `signIn(response: AuthResponse): void`, `restore(): Promise<void>`, `refresh(): Observable<string>`, `signOut(): Promise<void>`, `clear(): void`
+  - `SessionService` with `user: Signal<UserProfile | null>`, `isAuthenticated: Signal<boolean>`, `accessToken(): string | null`, `signIn(response: AuthResponse): void`, `setUser(user: UserProfile): void`, `restore(): Promise<void>`, `refresh(): Observable<string>`, `signOut(): Promise<void>`, `clear(): void`
   - `authInterceptor: HttpInterceptorFn`
   - `authGuard: CanActivateFn`, `guestGuard: CanActivateFn`
 
@@ -2888,6 +2893,30 @@ describe('signIn', () => {
     expect(session.accessToken()).toBe('token-1');
     expect(session.user()).toEqual(profile);
     expect(session.isAuthenticated()).toBe(true);
+  });
+});
+
+describe('setUser', () => {
+  it('replaces the profile and leaves the token alone', () => {
+    session.signIn({ accessToken: 'token-1', user: profile });
+
+    session.setUser({ ...profile, name: 'Ada Lovelace' });
+
+    expect(session.user()?.name).toBe('Ada Lovelace');
+    expect(session.accessToken()).toBe('token-1');
+  });
+
+  it('does not discard an in-flight refresh', () => {
+    // Saving a profile is not a sign-in. Routing it through signIn would
+    // reset the single-flight state and let a second refresh go out.
+    session.signIn({ accessToken: 'token-1', user: profile });
+    session.refresh().subscribe({ error: () => undefined });
+
+    session.setUser({ ...profile, name: 'Ada Lovelace' });
+    session.refresh().subscribe({ error: () => undefined });
+
+    expect(http.match('/api/auth/refresh')).toHaveLength(1);
+    http.match('/api/auth/refresh').forEach((r) => r.flush({ accessToken: 'token-2' }));
   });
 });
 
@@ -3054,6 +3083,15 @@ export class SessionService {
     this.resetRefresh();
     this.token.set(response.accessToken);
     this.currentUser.set(response.user);
+  }
+
+  /**
+   * Replaces the profile without touching the token or the refresh state.
+   * Saving a name is not a sign-in, and routing it through `signIn` would
+   * discard an in-flight refresh for no reason.
+   */
+  setUser(user: UserProfile): void {
+    this.currentUser.set(user);
   }
 
   clear(): void {
@@ -5452,6 +5490,7 @@ import { provideHttpClientTesting } from '@angular/common/http/testing';
 import { provideZonelessChangeDetection } from '@angular/core';
 import { TestBed } from '@angular/core/testing';
 import { Router, provideRouter } from '@angular/router';
+import { provideAnimationsAsync } from '@angular/platform-browser/animations/async';
 import { beforeEach, describe, expect, it } from 'vitest';
 import { App } from './app';
 import { routes } from './app.routes';
@@ -5464,22 +5503,12 @@ beforeEach(() => {
       provideRouter(routes),
       provideHttpClient(),
       provideHttpClientTesting(),
+      provideAnimationsAsync('noop'),
     ],
   });
 });
 
 describe('routing', () => {
-  it('sends an anonymous visitor from a protected route to the login screen', async () => {
-    const router = TestBed.inject(Router);
-    const fixture = TestBed.createComponent(App);
-
-    await router.navigateByUrl('/categories');
-    await fixture.whenStable();
-
-    expect(router.url).toContain('/login');
-    expect(router.url).toContain('returnUrl');
-  });
-
   it('renders the not-found screen for an unknown path', async () => {
     const router = TestBed.inject(Router);
     const fixture = TestBed.createComponent(App);
@@ -5500,8 +5529,24 @@ describe('routing', () => {
     expect(router.url).toBe('/login');
     expect(fixture.nativeElement.textContent).toContain('Sign in');
   });
+
+  it('shows the register screen', async () => {
+    const router = TestBed.inject(Router);
+    const fixture = TestBed.createComponent(App);
+
+    await router.navigateByUrl('/register');
+    await fixture.whenStable();
+
+    expect(fixture.nativeElement.textContent).toContain('Create an account');
+  });
 });
 ```
+
+**There is no guard test here on purpose.** `authGuard` guards the shell's
+children, and at this point the shell has no child but the redirect, so a
+navigation to any protected path backtracks past the `''` route and lands on
+`**` without ever running the guard. Task 9 registers the first real child and
+tests the guard there.
 
 - [ ] **Step 19: Run the whole suite**
 
@@ -5550,6 +5595,7 @@ Three properties of the shape matter and are each tested:
 - Create: `apps/web/src/app/categories/categories.component.ts` and `categories.component.spec.ts`
 - Create: `apps/web/src/app/categories/category-dialog.component.ts`
 - Modify: `apps/web/src/app/app.routes.ts`
+- Modify: `apps/web/src/app/app.spec.ts` — the guard tests Task 8 deferred
 
 **Interfaces:**
 - Consumes: `CategoriesApi` (Task 5); `SessionService` (Task 6); `errorMessage` (Task 5); `applyServerErrors`, `FieldErrorsComponent`, `EmptyStateComponent`, `NotificationService`, `ConfirmDialogComponent` (Task 7).
@@ -6287,12 +6333,46 @@ array, after the redirect:
 },
 ```
 
-- [ ] **Step 9: Run the test to verify it passes**
+- [ ] **Step 9: Add the guard tests that Task 8 could not run**
 
-Run: `npx nx test web -- categories`
-Expected: PASS, both the store and the component suites.
+`/categories` is the first protected child the shell has, so this is the
+first point at which `authGuard` is reachable at all. Until now a
+navigation to a protected path backtracked past the `''` route and landed
+on `**` without the guard ever running.
 
-- [ ] **Step 10: Prove the loaded-versus-empty distinction is tested**
+Append to `apps/web/src/app/app.spec.ts`:
+
+```ts
+describe('the guarded area', () => {
+  it('sends an anonymous visitor to the login screen', async () => {
+    const router = TestBed.inject(Router);
+    const fixture = TestBed.createComponent(App);
+
+    await router.navigateByUrl('/categories');
+    await fixture.whenStable();
+
+    expect(router.url).toContain('/login');
+  });
+
+  it('carries the attempted path so they land where they were going', async () => {
+    const router = TestBed.inject(Router);
+    const fixture = TestBed.createComponent(App);
+
+    await router.navigateByUrl('/categories');
+    await fixture.whenStable();
+
+    expect(decodeURIComponent(router.url)).toContain('returnUrl=/categories');
+  });
+});
+```
+
+- [ ] **Step 10: Run the test to verify it passes**
+
+Run: `npx nx test web -- categories app.spec`
+Expected: PASS, the store suite, the component suite, and the routing
+suite.
+
+- [ ] **Step 11: Prove the loaded-versus-empty distinction is tested**
 
 Temporarily change `isEmpty` to `computed(() => this.items().length === 0)`.
 
@@ -6304,13 +6384,14 @@ flight".
 Restore and re-run. Expected: PASS. This is the difference between an
 empty state and a bug report.
 
-- [ ] **Step 11: Commit**
+- [ ] **Step 12: Commit**
 
 ```bash
 git add apps/web/src/app/core/state/categories.store.ts \
         apps/web/src/app/core/state/categories.store.spec.ts \
         apps/web/src/app/categories \
-        apps/web/src/app/app.routes.ts
+        apps/web/src/app/app.routes.ts \
+        apps/web/src/app/app.spec.ts
 git commit -m "feat(web): manage categories, and establish the signal store pattern"
 ```
 
@@ -9406,7 +9487,7 @@ import { PaymentHistoryComponent } from './payment-history.component';
 Add `MatExpansionModule`, `MatDialogModule`, and `PaymentHistoryComponent`
 to the component's `imports` array.
 
-Replace the `@for` block that renders rows with:
+Replace the `@for` block inside the `@else` branch with:
 
 ```html
 <mat-accordion multi>
@@ -9416,16 +9497,26 @@ Replace the `@for` block that renders rows with:
         <app-instance-row [instance]="instance" />
       </mat-expansion-panel-header>
 
-      <div class="instance-actions">
-        @if (instance.status !== 'PAID') {
-          <button matButton="filled" (click)="openPayment(instance)">Record payment</button>
-        }
-        @if (instance.amountPaid !== 0) {
-          <button matButton (click)="confirmUnpay(instance)">Clear all payments</button>
-        }
-      </div>
+      <!--
+        The body is deferred behind matExpansionPanelContent on purpose.
+        A panel renders its content eagerly by default, which would mount
+        one app-payment-history per instance and fire a GET /payments for
+        every row the moment the screen loads — thirty requests to show
+        thirty collapsed rows. Deferred, the log is read when a person
+        actually opens a row, which is what spec §11 describes.
+      -->
+      <ng-template matExpansionPanelContent>
+        <div class="instance-actions">
+          @if (instance.status !== 'PAID') {
+            <button matButton="filled" (click)="openPayment(instance)">Record payment</button>
+          }
+          @if (instance.amountPaid !== 0) {
+            <button matButton (click)="confirmUnpay(instance)">Clear all payments</button>
+          }
+        </div>
 
-      <app-payment-history [instanceId]="instance.id" />
+        <app-payment-history [instanceId]="instance.id" />
+      </ng-template>
     </mat-expansion-panel>
   }
 </mat-accordion>
@@ -9514,44 +9605,82 @@ Add to the styles block:
 Append to `apps/web/src/app/instances/upcoming.component.spec.ts`:
 
 ```ts
+import { MatDialog } from '@angular/material/dialog';
+import { of } from 'rxjs';
+import { vi } from 'vitest';
+
+function dialogReturning(value: unknown) {
+  return vi
+    .spyOn(TestBed.inject(MatDialog), 'open')
+    .mockReturnValue({ afterClosed: () => of(value) } as never);
+}
+
+const payment = {
+  id: 'pay-1',
+  billInstanceId: 'inst-1',
+  amountPaid: 1200,
+  paidAt: '2026-10-01T12:00:00.000Z',
+  note: null,
+  reversesPaymentId: null,
+};
+
 describe('payment actions', () => {
-  it('offers no record-payment button on a paid instance', async () => {
-    const fixture = TestBed.createComponent(UpcomingComponent);
-    await fixture.whenStable();
-    instancesRequest().flush([{ ...base, status: 'PAID', amountPaid: 1200 }]);
-    await fixture.whenStable();
-
-    expect(fixture.nativeElement.textContent).not.toContain('Record payment');
-  });
-
-  it('offers no clear-payments button on an instance with no payments', async () => {
-    const fixture = TestBed.createComponent(UpcomingComponent);
-    await fixture.whenStable();
-    instancesRequest().flush([base]);
-    await fixture.whenStable();
-
-    expect(fixture.nativeElement.textContent).not.toContain('Clear all payments');
-  });
-
-  it('shows a failed payment without changing the row', async () => {
+  it('records a payment and patches the row from the response', async () => {
+    dialogReturning({ note: null });
     const fixture = TestBed.createComponent(UpcomingComponent);
     await fixture.whenStable();
     instancesRequest().flush([base]);
     await fixture.whenStable();
 
     const done = fixture.componentInstance.openPayment(base);
-    // The dialog is not opened in this unit test; drive the service path
-    // directly through the component to keep the assertion on behaviour.
+    const req = http.expectOne('/api/bill-instances/inst-1/payments');
+    expect(req.request.body).toEqual({ note: null });
+    req.flush({ instance: { ...base, status: 'PAID', amountPaid: 1200 }, payment });
     await done;
+    await fixture.whenStable();
+
+    expect(fixture.nativeElement.textContent).toContain('Paid');
+  });
+
+  it('shows a failed payment without changing the row', async () => {
+    dialogReturning({ note: null });
+    const fixture = TestBed.createComponent(UpcomingComponent);
+    await fixture.whenStable();
+    instancesRequest().flush([base]);
+    await fixture.whenStable();
+
+    const done = fixture.componentInstance.openPayment(base);
+    http
+      .expectOne('/api/bill-instances/inst-1/payments')
+      .flush({ message: 'Amount exceeds the balance' }, { status: 400, statusText: 'Bad Request' });
+    await done;
+    await fixture.whenStable();
+
+    expect(fixture.componentInstance.actionError()).toContain('Amount exceeds the balance');
+    expect(fixture.nativeElement.textContent).toContain('Unpaid');
+  });
+
+  it('sends nothing when the dialog is dismissed', async () => {
+    dialogReturning(undefined);
+    const fixture = TestBed.createComponent(UpcomingComponent);
+    await fixture.whenStable();
+    instancesRequest().flush([base]);
+    await fixture.whenStable();
+
+    await fixture.componentInstance.openPayment(base);
+
+    http.expectNone('/api/bill-instances/inst-1/payments');
   });
 });
 ```
 
-Note: the third test above opens a real dialog, which `afterClosed()`
-resolves to `undefined` when nothing is chosen, so it asserts the
-early-return path and leaves no outstanding request. If the dialog cannot
-open under the test harness, replace it with a `MatDialog.open` spy
-returning `of(undefined)`, as `bills.component.spec.ts` does.
+Move the three imports at the top of that block up into the file's existing
+import block rather than leaving them mid-file.
+
+The buttons these actions sit behind are inside the deferred panel body, so
+they do not exist until a row is expanded — which is why these tests drive
+`openPayment` directly rather than clicking. Expansion itself is covered by
+the Playwright journeys in Task 15.
 
 - [ ] **Step 15: Run the whole suite**
 
@@ -9913,8 +10042,7 @@ export class SettingsComponent {
 
     this.usersApi.updateProfile(this.profileForm.getRawValue()).subscribe({
       next: (profile) => {
-        const token = this.session.accessToken();
-        if (token !== null) this.session.signIn({ accessToken: token, user: profile });
+        this.session.setUser(profile);
         this.notifications.success('Profile saved');
       },
       error: (error: unknown) => {
@@ -10028,6 +10156,8 @@ Create `apps/web-e2e/src/global-setup.ts`:
 
 ```ts
 import 'reflect-metadata';
+import { execFileSync } from 'node:child_process';
+import { workspaceRoot } from '@nx/devkit';
 import { DataSource } from 'typeorm';
 
 /**
@@ -10068,11 +10198,18 @@ export default async function globalSetup(): Promise<void> {
   }
   await admin.destroy();
 
-  process.env.DATABASE_URL = url;
-  const { AppDataSource } = await import('../../api/src/database/data-source.js');
-  await AppDataSource.initialize();
-  await AppDataSource.runMigrations();
-  await AppDataSource.destroy();
+  // Migrations run through the workspace's own script rather than by
+  // importing the API's data source. A cross-project `.js` specifier
+  // resolves to a `.ts` file under Vitest but not reliably under
+  // Playwright's loader, and `npm run migration:run` is a path the
+  // repository already exercises. `data-source.ts` reads
+  // `process.env.DATABASE_URL` directly, and dotenv leaves an existing
+  // value alone, so this override is what it sees.
+  execFileSync('npm', ['run', 'migration:run'], {
+    cwd: workspaceRoot,
+    env: { ...process.env, DATABASE_URL: url },
+    stdio: 'inherit',
+  });
 }
 ```
 
