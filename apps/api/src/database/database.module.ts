@@ -5,6 +5,9 @@ import type { Env } from '../config/env.schema';
 import { User } from '../users/user.entity';
 import { RefreshToken } from '../auth/refresh-token.entity';
 import { Category } from '../categories/category.entity';
+import { Bill } from '../bills/bill.entity';
+import { BillInstance } from '../bills/bill-instance.entity';
+import { PaymentLog } from '../bills/payment-log.entity';
 
 @Module({
   imports: [
@@ -14,7 +17,7 @@ import { Category } from '../categories/category.entity';
         type: 'postgres' as const,
         url: config.get('DATABASE_URL', { infer: true }),
         ssl: config.get('DB_SSL', { infer: true }) ? { rejectUnauthorized: true } : false,
-        entities: [User, RefreshToken, Category],
+        entities: [User, RefreshToken, Category, Bill, BillInstance, PaymentLog],
         synchronize: false,
         migrationsRun: false,
         // Without this, a connection checkout the pool can't satisfy hangs

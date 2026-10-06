@@ -193,6 +193,12 @@ schema has.
 
 ### Forward schema (migrated in sub-project 2)
 
+> **Amended by `2026-10-05-bills-api-design.md`.** That spec is the
+> authority for these three tables. It adds two columns to
+> `bill_instances` (`amount_paid`, `is_customized`), adds
+> `reverses_payment_id` to `payment_logs`, and changes `BillStatus`
+> and the overdue mechanism as noted below.
+
 A recurring bill is modeled as a **template plus generated instances**.
 The template holds the definition; each occurrence is its own row with
 its own due date, amount, and status. This keeps history accurate, lets
@@ -228,8 +234,13 @@ column is not a historical record.
 Instances are materialized **eagerly to a rolling 12-month horizon** by a
 startup task and a nightly `@Cron` job. Every read — list, calendar,
 dashboard, overdue sweep — is then a plain indexed range query with no
-recurrence arithmetic at query time. Overdue marking is one
-`UPDATE ... WHERE due_date < CURRENT_DATE AND status = 'UNPAID'`.
+recurrence arithmetic at query time.
+
+> **Superseded.** This paragraph originally specified overdue marking as
+> one `UPDATE ... WHERE due_date < CURRENT_DATE AND status = 'UNPAID'`.
+> Sub-project 2 removes that job: overdue is derived at read time as
+> `status <> 'PAID' AND due_date < today`, so no row is ever stale and
+> no sweep exists. See `2026-10-05-bills-api-design.md` §2.1.
 
 Lazy on-read expansion was rejected: it pushes recurrence logic into
 every read path, where sorting, filtering, and paginating a mixed set of
@@ -256,7 +267,10 @@ future instances.
   The two enumerations, fixed here so sub-project 2 does not re-invent
   them:
   - `BillFrequency`: `ONE_TIME` | `WEEKLY` | `MONTHLY` | `ANNUALLY`
-  - `BillStatus`: `UNPAID` | `PAID` | `OVERDUE`
+  - `BillStatus`: `UNPAID` | `PARTIALLY_PAID` | `PAID`
+    (**amended** by `2026-10-05-bills-api-design.md` §2.1, which added
+    partial payments and removed `OVERDUE` as a stored value. Overdue is
+    derived, not stored; it remains a query filter.)
 
 ## 7. Authentication
 
@@ -582,10 +596,10 @@ stopping the stack, restarting it, and confirming the row survived.
 
 ## 13. Open items for later sub-projects
 
-- Template edits versus existing future instances: "this occurrence" or
-  "all future occurrences" semantics (sub-project 2).
-- `DELETE /api/categories/:id` gains a 409 when bills reference the
-  category (sub-project 2).
+- ~~Template edits versus existing future instances~~ — **closed** by
+  `2026-10-05-bills-api-design.md` §5.4: a template edit rewrites
+  future instances that are unpaid and uncustomized, and nothing else.
+- ~~`DELETE /api/categories/:id` 409~~ — **closed** by that spec §7.4.
 - Angular UI component strategy, not yet decided (sub-project 3).
 - Notification delivery channel — real email provider or in-app only —
   not yet decided (sub-project 5).

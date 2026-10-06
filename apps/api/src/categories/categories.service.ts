@@ -1,7 +1,8 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
+import { ConflictException, Injectable, NotFoundException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { Category } from './category.entity';
+import { Bill } from '../bills/bill.entity';
 import type {
   CategoryResponse, CreateCategoryRequest, UpdateCategoryRequest,
 } from '@bill-tracker/shared-types';
@@ -14,6 +15,7 @@ const toResponse = (c: Category): CategoryResponse => ({
 export class CategoriesService {
   constructor(
     @InjectRepository(Category) private readonly categories: Repository<Category>,
+    @InjectRepository(Bill) private readonly bills: Repository<Bill>,
   ) {}
 
   async findAll(userId: string): Promise<CategoryResponse[]> {
@@ -39,6 +41,14 @@ export class CategoriesService {
   }
 
   async remove(userId: string, id: string): Promise<void> {
+    // Scoped to userId: another user's bill must never make this user's
+    // category undeletable.
+    const used = await this.bills.count({ where: { categoryId: id, userId } });
+    if (used > 0) {
+      throw new ConflictException(
+        `This category is used by ${used} bill(s). Reassign or delete them first.`,
+      );
+    }
     const result = await this.categories.delete({ id, userId });
     if (!result.affected) throw new NotFoundException('Category not found');
   }

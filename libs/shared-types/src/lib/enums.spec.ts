@@ -6,7 +6,8 @@ describe('bill enums', () => {
     expect(BILL_FREQUENCIES).toEqual(['ONE_TIME', 'WEEKLY', 'MONTHLY', 'ANNUALLY']);
   });
 
-  it('exposes exactly the three statuses the schema CHECK allows', () => {
-    expect(BILL_STATUSES).toEqual(['UNPAID', 'PAID', 'OVERDUE']);
+  it('describes payment progress only, with no OVERDUE member', () => {
+    expect(BILL_STATUSES).toEqual(['UNPAID', 'PARTIALLY_PAID', 'PAID']);
+    expect(BILL_STATUSES).not.toContain('OVERDUE');
   });
 });
