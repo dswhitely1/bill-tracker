@@ -254,6 +254,9 @@ describe('NotificationsStore stale-response guard', () => {
 
     expect(store.items().find((i) => i.id === 'n1')?.isRead).toBe(true);
     expect(store.unreadCount()).toBe(1);
+    // Both fetches have now settled — one by writing, one by being
+    // skipped — so nothing should be outstanding any more.
+    expect(store.loading()).toBe(false);
   });
 
   it('does not let an in-flight list response undo a mark-read', async () => {
@@ -282,6 +285,10 @@ describe('NotificationsStore stale-response guard', () => {
 
     expect(store.items().find((i) => i.id === 'n1')?.isRead).toBe(true);
     expect(store.unreadCount()).toBe(1);
+    // The mark-read bump invalidated this fetch's data, but the fetch
+    // itself still finished — its slot in `inFlight` must be given up, or
+    // the progress bar would spin forever with nothing left to clear it.
+    expect(store.loading()).toBe(false);
   });
 });
 

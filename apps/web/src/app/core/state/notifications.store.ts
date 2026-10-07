@@ -42,6 +42,17 @@ export class NotificationsStore {
    */
   private fetchGeneration = 0;
 
+  /**
+   * Count of `fetch()` calls currently awaiting a response. `loading`
+   * answers a different question than `fetchGeneration`: whether *any*
+   * fetch is outstanding, not whether a *given* fetch's data is still
+   * wanted. The two cannot share one mechanism — a `markRead`/
+   * `markAllRead` bump can invalidate an in-flight fetch's data without
+   * starting a fetch of its own, so there would be nothing left to clear
+   * `loading` if it were gated on the generation matching at resolution.
+   */
+  private inFlight = 0;
+
   readonly items = this.data.asReadonly();
   readonly unreadCount = this.unread.asReadonly();
   readonly truncated = this.truncatedState.asReadonly();
@@ -141,10 +152,20 @@ export class NotificationsStore {
     this.loadedState.set(false);
     this.errorState.set(null);
     this.loadingState.set(false);
+    // Without this, a fetch already in flight when the session ends would
+    // still decrement `inFlight` when it eventually settles — against a
+    // baseline that never accounted for the reset — and if a second fetch
+    // was also outstanding at that moment, the first one landing would
+    // compute `inFlight > 0` as true and flip `loadingState` back on right
+    // after this line turned it off. Zeroing it here means every post-reset
+    // fetch's own increment/decrement nets out correctly regardless of
+    // what either counter's absolute value happens to be afterward.
+    this.inFlight = 0;
   }
 
   private async fetch(): Promise<void> {
     const generation = ++this.fetchGeneration;
+    this.inFlight++;
     this.loadingState.set(true);
     this.errorState.set(null);
     try {
@@ -162,10 +183,15 @@ export class NotificationsStore {
       if (this.fetchGeneration !== generation) return;
       this.errorState.set(errorMessage(error));
     } finally {
-      // Likewise for `loading`: only the most recent fetch is allowed to
-      // clear it, or an older one settling last would hide the progress
-      // bar while the newer fetch is still running.
-      if (this.fetchGeneration === generation) this.loadingState.set(false);
+      // `loading` tracks whether any fetch is outstanding — a count, not
+      // a generation. Decrementing unconditionally (unlike the data writes
+      // above) is what makes that correct: this fetch's data may have just
+      // been skipped because a newer fetch, or a mark-read/mark-all-read
+      // that started no fetch at all, invalidated it, but this fetch is
+      // still finishing and must still give up its slot. Only once nothing
+      // is left outstanding does `loading` clear.
+      this.inFlight--;
+      this.loadingState.set(this.inFlight > 0);
     }
   }
 }
