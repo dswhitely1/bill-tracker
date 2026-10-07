@@ -216,6 +216,47 @@ describe('NotificationsStore.markAllRead', () => {
   });
 });
 
+describe('NotificationsStore stale-response guard', () => {
+  it('does not let an out-of-order stale list response undo a mark-read', async () => {
+    const loading = store.load();
+    http.expectOne('/api/notifications').flush(
+      response({ items: [item({ id: 'n1' }), item({ id: 'n2' })], unreadCount: 2 }),
+    );
+    await loading;
+
+    // A refresh goes out — this is what visibilitychange does — and it is
+    // still in flight when the user clicks a reminder.
+    const first = store.refresh();
+    const staleList = http.expectOne('/api/notifications');
+
+    const marking = store.markRead('n1');
+    http.expectOne('/api/notifications/n1/read').flush(null);
+    await marking;
+
+    // A second refresh goes out before the first one has resolved — e.g.
+    // the tab is switched to and from again — and its response, reflecting
+    // the mark-read that already landed on the server, arrives first.
+    const second = store.refresh();
+    const freshList = http.expectOne('/api/notifications');
+    freshList.flush(
+      response({ items: [item({ id: 'n1', isRead: true }), item({ id: 'n2' })], unreadCount: 1 }),
+    );
+    await second;
+
+    // Only now does the first, now-stale request land, out of order,
+    // still carrying n1 as unread. Without the generation guard this is
+    // the response fetch() would apply last, undoing the mark-read a
+    // second time even though the server has long since caught up.
+    staleList.flush(
+      response({ items: [item({ id: 'n1' }), item({ id: 'n2' })], unreadCount: 2 }),
+    );
+    await first;
+
+    expect(store.items().find((i) => i.id === 'n1')?.isRead).toBe(true);
+    expect(store.unreadCount()).toBe(1);
+  });
+});
+
 describe('NotificationsStore session reset', () => {
   it('drops everything when the session ends', async () => {
     const loading = store.load();

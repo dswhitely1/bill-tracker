@@ -23,6 +23,17 @@ export class NotificationsStore {
   private readonly errorState = signal<string | null>(null);
   private readonly loadedState = signal(false);
 
+  /**
+   * Monotonic request generation. Two fetches can be in flight at once —
+   * e.g. two `visibilitychange` refreshes close together — and resolve
+   * out of order; without this, whichever response lands *last* wins even
+   * if it was issued *first*, which can mean a stale list overwriting rows
+   * a later fetch (or a `markRead`/`markAllRead` patch applied in between)
+   * already settled. Same shape as `InstancesStore.fetchGeneration`,
+   * guarding against the same kind of late arrival.
+   */
+  private fetchGeneration = 0;
+
   readonly items = this.data.asReadonly();
   readonly unreadCount = this.unread.asReadonly();
   readonly truncated = this.truncatedState.asReadonly();
@@ -109,18 +120,28 @@ export class NotificationsStore {
   }
 
   private async fetch(): Promise<void> {
+    const generation = ++this.fetchGeneration;
     this.loadingState.set(true);
     this.errorState.set(null);
     try {
       const response = await firstValueFrom(this.api.list());
+      // A newer fetch has started since this one went out — its response
+      // (or the error it threw) belongs to a view nobody is looking at any
+      // more. Applying it now would overwrite rows a newer fetch (or a
+      // `markRead`/`markAllRead` that landed in between) already settled.
+      if (this.fetchGeneration !== generation) return;
       this.data.set(response.items);
       this.unread.set(response.unreadCount);
       this.truncatedState.set(response.truncated);
       this.loadedState.set(true);
     } catch (error: unknown) {
+      if (this.fetchGeneration !== generation) return;
       this.errorState.set(errorMessage(error));
     } finally {
-      this.loadingState.set(false);
+      // Likewise for `loading`: only the most recent fetch is allowed to
+      // clear it, or an older one settling last would hide the progress
+      // bar while the newer fetch is still running.
+      if (this.fetchGeneration === generation) this.loadingState.set(false);
     }
   }
 }
