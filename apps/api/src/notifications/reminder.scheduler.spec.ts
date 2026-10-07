@@ -1,4 +1,5 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { Logger } from '@nestjs/common';
 import { SchedulerRegistry } from '@nestjs/schedule';
 import type { ConfigService } from '@nestjs/config';
 import type { Env } from '../config/env.schema';
@@ -14,11 +15,19 @@ function configWith(values: Partial<Env>): ConfigService<Env, true> {
 let registry: SchedulerRegistry;
 let run: ReturnType<typeof vi.fn<() => Promise<RunResult>>>;
 let reminders: RemindersService;
+let logError: ReturnType<typeof vi.spyOn>;
 
 beforeEach(() => {
   registry = new SchedulerRegistry();
   run = vi.fn<() => Promise<RunResult>>().mockResolvedValue(NOTHING);
   reminders = { run } as unknown as RemindersService;
+  // Silenced as well as observed: the deliberate-failure tests below would
+  // otherwise print real ERROR lines into an otherwise-green run.
+  logError = vi.spyOn(Logger.prototype, 'error').mockImplementation(() => undefined);
+});
+
+afterEach(() => {
+  vi.restoreAllMocks();
 });
 
 const build = (env: Partial<Env>): ReminderScheduler =>
@@ -73,20 +82,63 @@ describe('ReminderScheduler in a real environment', () => {
     expect(registry.getCronJobs().size).toBe(1);
   });
 
-  it('does not reject when the bootstrap run throws', async () => {
-    run.mockRejectedValueOnce(new Error('database is not up yet'));
+  it('catches and logs a failed bootstrap run instead of letting it escape', async () => {
+    const failure = new Error('database is not up yet');
+    run.mockRejectedValueOnce(failure);
+    const escaped: unknown[] = [];
+    const onUnhandled = (reason: unknown): void => {
+      escaped.push(reason);
+    };
+    process.on('unhandledRejection', onUnhandled);
 
-    // The bootstrap run is not awaited by `onApplicationBootstrap`, so the
-    // hook settling cleanly proves only that *starting* the run didn't
-    // throw synchronously. The real claim — that the run's own rejection
-    // never escapes as an unhandled rejection — is `runOnce`'s try/catch,
-    // exercised directly above; this asserts the hook's own promise shape.
-    await expect(
-      build({ NODE_ENV: 'development', APP_TIMEZONE: 'UTC' }).onApplicationBootstrap(),
-    ).resolves.toBeUndefined();
-    // Drain the microtask queue so the rejected `run()` mock settles
-    // within this test rather than leaking into the next one.
+    try {
+      await build({ NODE_ENV: 'development', APP_TIMEZONE: 'UTC' }).onApplicationBootstrap();
+      // Two turns: one for the rejected `run()` to settle into `runOnce`'s
+      // catch, one for an uncaught rejection to reach the process listener
+      // if the catch were ever removed.
+      await Promise.resolve();
+      await Promise.resolve();
+
+      // Asserting on the log rather than on the hook's promise is the whole
+      // point. The bootstrap call is `void`-dispatched, so the hook resolves
+      // whether `runOnce` catches, rejects, or does nothing at all — a test
+      // on the hook's own settlement cannot fail for this reason. The logged
+      // error is the only observable proof the catch actually ran.
+      expect(logError).toHaveBeenCalledWith('Bootstrap reminder run failed', failure);
+      expect(escaped).toEqual([]);
+    } finally {
+      process.off('unhandledRejection', onUnhandled);
+    }
+  });
+
+  it('catches and logs a failed daily run, so a cron callback cannot kill the process', async () => {
+    await build({ NODE_ENV: 'development', APP_TIMEZONE: 'UTC' }).onApplicationBootstrap();
     await Promise.resolve();
+    logError.mockClear();
+
+    const failure = new Error('smtp is down');
+    run.mockRejectedValueOnce(failure);
+    const escaped: unknown[] = [];
+    const onUnhandled = (reason: unknown): void => {
+      escaped.push(reason);
+    };
+    process.on('unhandledRejection', onUnhandled);
+
+    try {
+      // Fire the registered job's own callback. Nothing else in this suite
+      // invokes it, so without this the `Daily` path's error handling rests
+      // on it sharing `runOnce` with the bootstrap path rather than on any
+      // test. A throw out of a cron callback is an unhandled rejection that
+      // can take the process down.
+      registry.getCronJob('bill-reminders').fireOnTick();
+      await Promise.resolve();
+      await Promise.resolve();
+
+      expect(logError).toHaveBeenCalledWith('Daily reminder run failed', failure);
+      expect(escaped).toEqual([]);
+    } finally {
+      process.off('unhandledRejection', onUnhandled);
+    }
   });
 
   it('fires at 08:00, after the horizon roll rather than before it', async () => {
