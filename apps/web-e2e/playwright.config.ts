@@ -77,6 +77,16 @@ export default defineConfig({
       timeout: 180_000,
       stdout: 'pipe',
       stderr: 'pipe',
+      // PORT is pinned here for the same reason `apiEnv` pins it above, and
+      // leaving it unset was an asymmetry that eventually bit. The Angular
+      // dev server reads the workspace `.env` and lets a `PORT` there
+      // override the `--port` argument — it announces `Environment variable
+      // "PORT" detected. Using port 3000.` and binds that instead. Since
+      // `.env.example` ships `PORT=3000`, every developer who follows the
+      // README's setup step has one, so the flag above is silently ignored
+      // and Playwright waits out its full timeout polling a port nothing is
+      // listening on.
+      env: { PORT: String(WEB_PORT) },
     },
   ],
 });
