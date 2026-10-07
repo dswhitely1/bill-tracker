@@ -2,8 +2,10 @@ import { Module } from '@nestjs/common';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { BillsModule } from '../bills/bills.module';
 import { Notification } from './notification.entity';
-import { RemindersService } from './reminders.service';
+import { NotificationsController } from './notifications.controller';
+import { NotificationsService } from './notifications.service';
 import { ReminderScheduler } from './reminder.scheduler';
+import { RemindersService } from './reminders.service';
 import { mailTransportProvider } from './mail/mail-transport.provider';
 
 /**
@@ -14,7 +16,13 @@ import { mailTransportProvider } from './mail/mail-transport.provider';
  */
 @Module({
   imports: [TypeOrmModule.forFeature([Notification]), BillsModule],
-  providers: [RemindersService, ReminderScheduler, mailTransportProvider],
-  exports: [RemindersService],
+  controllers: [NotificationsController],
+  providers: [
+    NotificationsService,
+    RemindersService,
+    ReminderScheduler,
+    mailTransportProvider,
+  ],
+  exports: [NotificationsService, RemindersService],
 })
 export class NotificationsModule {}
