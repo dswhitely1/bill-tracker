@@ -82,6 +82,6 @@ describe('guestGuard', () => {
     const result = runInInjectionContext(injector, () => guestGuard(route, stateFor('/login')));
 
     expect(result).toBeInstanceOf(UrlTree);
-    expect(String(result)).toContain('/upcoming');
+    expect(String(result)).toContain('/dashboard');
   });
 });

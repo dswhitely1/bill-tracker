@@ -84,7 +84,7 @@ describe('RegisterComponent', () => {
     await fixture.whenStable();
 
     expect(TestBed.inject(SessionService).isAuthenticated()).toBe(true);
-    expect(navigate).toHaveBeenCalledWith('/upcoming');
+    expect(navigate).toHaveBeenCalledWith('/dashboard');
   });
 
   it('shows a duplicate-email 409 in the banner', async () => {

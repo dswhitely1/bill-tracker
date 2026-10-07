@@ -69,7 +69,7 @@ describe('LoginComponent', () => {
     await fixture.whenStable();
 
     expect(TestBed.inject(SessionService).isAuthenticated()).toBe(true);
-    expect(navigate).toHaveBeenCalledWith('/upcoming');
+    expect(navigate).toHaveBeenCalledWith('/dashboard');
   });
 
   it('renders the required-field message after submitting an empty form', async () => {
@@ -167,7 +167,7 @@ describe('LoginComponent and the returnUrl', () => {
     http.expectOne('/api/auth/login').flush({ accessToken: 'token-1', user: profile });
     await fixture.whenStable();
 
-    expect(navigate).toHaveBeenCalledWith('/upcoming');
+    expect(navigate).toHaveBeenCalledWith('/dashboard');
   });
 });
 

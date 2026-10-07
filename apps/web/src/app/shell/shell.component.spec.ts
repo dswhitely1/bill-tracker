@@ -58,7 +58,7 @@ describe('ShellComponent', () => {
       a.getAttribute('href'),
     );
     expect(hrefs).toEqual(
-      expect.arrayContaining(['/upcoming', '/bills', '/categories', '/settings']),
+      expect.arrayContaining(['/dashboard', '/calendar', '/upcoming', '/bills', '/categories', '/settings']),
     );
   });
 
