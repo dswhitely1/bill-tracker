@@ -12,7 +12,7 @@ import { EmptyStateComponent } from '../shared/empty-state.component';
       title="That page does not exist"
       message="The link may be out of date, or the bill it pointed to may have been deleted."
     >
-      <a matButton="filled" routerLink="/upcoming">Go to Upcoming</a>
+      <a matButton="filled" routerLink="/dashboard">Go to Dashboard</a>
     </app-empty-state>
   `,
   changeDetection: ChangeDetectionStrategy.OnPush,

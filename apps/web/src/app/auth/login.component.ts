@@ -125,7 +125,7 @@ export class LoginComponent {
         this.session.signIn(response);
         this.submitting.set(false);
         void this.router.navigateByUrl(
-          safeReturnUrl(this.route.snapshot.queryParams['returnUrl'], '/upcoming'),
+          safeReturnUrl(this.route.snapshot.queryParams['returnUrl'], '/dashboard'),
         );
       },
       error: (error: unknown) => {

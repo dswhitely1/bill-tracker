@@ -129,7 +129,7 @@ export class RegisterComponent {
       next: (response) => {
         this.session.signIn(response);
         this.submitting.set(false);
-        void this.router.navigateByUrl('/upcoming');
+        void this.router.navigateByUrl('/dashboard');
       },
       error: (error: unknown) => {
         this.submitting.set(false);

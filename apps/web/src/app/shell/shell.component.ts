@@ -32,6 +32,14 @@ import { SessionService } from '../core/auth/session.service';
     <mat-sidenav-container>
       <mat-sidenav mode="side" opened>
         <mat-nav-list>
+          <a mat-list-item routerLink="/dashboard" routerLinkActive="active">
+            <mat-icon matListItemIcon>dashboard</mat-icon>
+            <span matListItemTitle>Dashboard</span>
+          </a>
+          <a mat-list-item routerLink="/calendar" routerLinkActive="active">
+            <mat-icon matListItemIcon>calendar_month</mat-icon>
+            <span matListItemTitle>Calendar</span>
+          </a>
           <a mat-list-item routerLink="/upcoming" routerLinkActive="active">
             <mat-icon matListItemIcon>event</mat-icon>
             <span matListItemTitle>Upcoming</span>

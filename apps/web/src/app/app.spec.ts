@@ -1,12 +1,23 @@
 import { provideHttpClient } from '@angular/common/http';
-import { provideHttpClientTesting } from '@angular/common/http/testing';
+import { HttpTestingController, provideHttpClientTesting } from '@angular/common/http/testing';
 import { provideZonelessChangeDetection } from '@angular/core';
 import { TestBed } from '@angular/core/testing';
 import { Router, provideRouter } from '@angular/router';
 import { MATERIAL_ANIMATIONS } from '@angular/material/core';
-import { beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { App } from './app';
 import { routes } from './app.routes';
+import { SessionService } from './core/auth/session.service';
+
+let http: HttpTestingController;
+
+/** Signs a session in so navigation into the guarded area is admitted. */
+function signIn(): void {
+  TestBed.inject(SessionService).signIn({
+    accessToken: 'token-1',
+    user: { id: 'user-1', email: 'a@b.c', name: 'Ada', notifyEmail: true, notifyInApp: true },
+  });
+}
 
 beforeEach(() => {
   TestBed.configureTestingModule({
@@ -19,6 +30,11 @@ beforeEach(() => {
       { provide: MATERIAL_ANIMATIONS, useValue: { animationsDisabled: true } },
     ],
   });
+  http = TestBed.inject(HttpTestingController);
+});
+
+afterEach(() => {
+  http.verify();
 });
 
 describe('routing', () => {
@@ -73,5 +89,61 @@ describe('the guarded area', () => {
     await fixture.whenStable();
 
     expect(decodeURIComponent(router.url)).toContain('returnUrl=/categories');
+  });
+});
+
+describe('the landing screen', () => {
+  it('redirects the bare origin to the dashboard', async () => {
+    signIn();
+    const router = TestBed.inject(Router);
+    const fixture = TestBed.createComponent(App);
+
+    await router.navigateByUrl('/');
+    await fixture.whenStable();
+    http.expectOne('/api/summary').flush({
+      asOf: '2026-10-07',
+      overdue: { count: 0, amount: 0, earliestDueDate: null },
+      thisMonth: { count: 0, total: 0, paid: 0 },
+      next7Days: { count: 0, amount: 0 },
+      byCategory: [],
+    });
+    await fixture.whenStable();
+    await fixture.whenStable();
+
+    expect(router.url).toBe('/dashboard');
+  });
+
+  it('mounts the dashboard at /dashboard', async () => {
+    signIn();
+    const router = TestBed.inject(Router);
+    const fixture = TestBed.createComponent(App);
+
+    await router.navigateByUrl('/dashboard');
+    await fixture.whenStable();
+    http.expectOne('/api/summary').flush({
+      asOf: '2026-10-07',
+      overdue: { count: 0, amount: 0, earliestDueDate: null },
+      thisMonth: { count: 0, total: 0, paid: 0 },
+      next7Days: { count: 0, amount: 0 },
+      byCategory: [],
+    });
+    await fixture.whenStable();
+    await fixture.whenStable();
+
+    expect(fixture.nativeElement.querySelector('h1')?.textContent?.trim()).toBe('Dashboard');
+  });
+
+  it('mounts the calendar at /calendar', async () => {
+    signIn();
+    const router = TestBed.inject(Router);
+    const fixture = TestBed.createComponent(App);
+
+    await router.navigateByUrl('/calendar');
+    await fixture.whenStable();
+    http.expectOne((req) => req.url === '/api/bill-instances').flush([]);
+    await fixture.whenStable();
+    await fixture.whenStable();
+
+    expect(fixture.nativeElement.querySelector('[aria-label="Previous month"]')).not.toBeNull();
   });
 });

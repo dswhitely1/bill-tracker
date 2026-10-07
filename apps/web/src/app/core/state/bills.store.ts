@@ -39,6 +39,15 @@ export class BillsStore {
    */
   readonly mutations = this.mutationCount.asReadonly();
 
+  /**
+   * Bumps the counter without a mutation behind it. The stores that watch
+   * this counter are the unit under test in their own specs; staging a
+   * real bill creation there would test this store instead of them.
+   */
+  announceMutation(): void {
+    this.mutationCount.update((n) => n + 1);
+  }
+
   constructor() {
     effect(() => {
       if (!this.session.isAuthenticated()) this.reset();

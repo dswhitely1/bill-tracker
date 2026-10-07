@@ -65,6 +65,15 @@ test('several requests failing at once produce exactly one refresh', async ({ pa
   await page.getByLabel('Password').fill(account.password);
   await page.getByRole('button', { name: 'Create account' }).click();
 
+  // Registration now lands on the dashboard, which loads only
+  // SummaryStore — neither of the two stores this stampede needs. The
+  // cold concurrent load is one navigation later, on arrival at
+  // /upcoming, where BillsStore and InstancesStore load together. The
+  // counter and the interception are already installed, so that landing
+  // is still the first time either endpoint is called.
+  await expect(page).toHaveURL(/\/dashboard/);
+  await page.getByRole('link', { name: 'Upcoming', exact: true }).click();
+
   await expect(page).toHaveURL(/\/upcoming/);
   // Exact match: the sidenav's "Upcoming" nav link is a link, not a
   // heading, but exactness costs nothing and keeps this honest.
@@ -90,12 +99,12 @@ test('a visitor whose refresh fails is told why', async ({ page }) => {
     body: JSON.stringify({ statusCode: 401, message: 'Unauthorized' }),
   };
 
-  // Categories, not bills: the Upcoming screen (where registerAndSignIn
-  // lands) now loads BillsStore too, for its bill filter — so by the time
-  // these routes are installed, BillsStore is already loaded and clicking
-  // "Bills" would serve its cached data without a new network call,
-  // never tripping this route at all. CategoriesStore is loaded only by
-  // the Bills screen, so it is still a guaranteed fresh request here.
+  // Categories, not bills: registerAndSignIn now lands on the dashboard,
+  // which loads neither BillsStore nor CategoriesStore — so by the time
+  // these routes are installed, both are still cold. CategoriesStore is
+  // loaded only by the Bills screen, so routing the 401 there (rather
+  // than on bills, which Upcoming would otherwise have already warmed in
+  // the old topology) is still a guaranteed fresh request here.
   await page.route(/\/api\/categories(\?|$)/, (route) => route.fulfill(unauthorized));
   await page.route(/\/api\/auth\/refresh/, (route) => route.fulfill(unauthorized));
 

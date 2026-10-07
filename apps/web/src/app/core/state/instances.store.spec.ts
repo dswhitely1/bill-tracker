@@ -166,6 +166,36 @@ describe('setQuery', () => {
   });
 });
 
+describe('overlapping fetches', () => {
+  it('keeps the latest request authoritative when an older, superseded request resolves later', async () => {
+    // Item 3. Two range changes in flight at once — clicking `>` twice
+    // quickly, or `>` then Today — and the *older* request's response
+    // happens to land after the *newer* one has already started. Without a
+    // generation guard, whichever response arrives last wins regardless of
+    // which request was actually issued last.
+    const first = store.setQuery({ from: '2026-10-01', to: '2026-10-31' });
+    const reqA = instanceRequest();
+    const second = store.setQuery({ from: '2026-11-01', to: '2026-11-30' });
+    const reqB = instanceRequest();
+
+    // A, the older and now-superseded request, resolves first.
+    reqA.flush([instance]);
+    await first;
+
+    // Its response must be dropped, and it must not clear `loading` while
+    // B — the still-authoritative, still in-flight request — has not yet
+    // settled.
+    expect(store.instances()).toEqual([]);
+    expect(store.loading()).toBe(true);
+
+    reqB.flush([{ ...instance, id: 'nov' }]);
+    await second;
+
+    expect(store.instances()).toEqual([{ ...instance, id: 'nov' }]);
+    expect(store.loading()).toBe(false);
+  });
+});
+
 describe('fetchedOn', () => {
   it('is set only once a fetch has actually succeeded', async () => {
     expect(store.fetchedOn()).toBeNull();

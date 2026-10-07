@@ -37,6 +37,6 @@ test('a bill becomes partly paid and then paid', async ({ page }) => {
   await expect(page.getByLabel('Pay the full remaining balance')).toBeChecked();
   await page.getByRole('button', { name: 'Record', exact: true }).click();
 
-  await expect(page.getByText('Paid').first()).toBeVisible();
+  await expect(page.getByText('Paid', { exact: true }).first()).toBeVisible();
   await expect(page.getByRole('button', { name: 'Record payment' })).toHaveCount(0);
 });

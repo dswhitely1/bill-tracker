@@ -7,10 +7,8 @@ import { authGuard, guestGuard } from './core/auth/auth.guard';
  * whole signed-in area instead of being repeated — and forgotten — on
  * each child.
  *
- * Children are added by the tasks that create their screens: `/categories`
- * in task 9, `/bills` in task 10, `/upcoming` in task 11, `/settings` in
- * task 13. Until task 11 the default redirect lands on the not-found
- * screen, which is expected mid-plan.
+ * `/dashboard` is the landing screen: a tracker's first question is "what
+ * do I owe", and every figure there links into the list that answers it.
  */
 export const routes: Routes = [
   {
@@ -28,7 +26,17 @@ export const routes: Routes = [
     canActivate: [authGuard],
     loadComponent: () => import('./shell/shell.component').then((m) => m.ShellComponent),
     children: [
-      { path: '', pathMatch: 'full', redirectTo: 'upcoming' },
+      { path: '', pathMatch: 'full', redirectTo: 'dashboard' },
+      {
+        path: 'dashboard',
+        loadComponent: () =>
+          import('./dashboard/dashboard.component').then((m) => m.DashboardComponent),
+      },
+      {
+        path: 'calendar',
+        loadComponent: () =>
+          import('./calendar/calendar.component').then((m) => m.CalendarComponent),
+      },
       {
         path: 'upcoming',
         loadComponent: () =>

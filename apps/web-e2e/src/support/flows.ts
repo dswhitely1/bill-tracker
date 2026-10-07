@@ -7,7 +7,7 @@ export async function registerAndSignIn(page: Page, account: TestAccount): Promi
   await page.getByLabel('Name').fill(account.name);
   await page.getByLabel('Password').fill(account.password);
   await page.getByRole('button', { name: 'Create account' }).click();
-  await expect(page).toHaveURL(/\/upcoming/);
+  await expect(page).toHaveURL(/\/dashboard/);
 }
 
 /**

@@ -8,7 +8,7 @@ test('an anonymous visitor lands on the sign-in screen', async ({ page }) => {
   await expect(page).toHaveURL(/\/login/);
 });
 
-test('registering signs the visitor in and shows the upcoming screen', async ({ page }) => {
+test('registering signs the visitor in and shows the dashboard', async ({ page }) => {
   const account = newAccount();
 
   await page.goto('/register');
@@ -17,6 +17,5 @@ test('registering signs the visitor in and shows the upcoming screen', async ({ 
   await page.getByLabel('Password').fill(account.password);
   await page.getByRole('button', { name: 'Create account' }).click();
 
-  await expect(page).toHaveURL(/\/upcoming/);
-  await expect(page.getByRole('heading', { name: 'Upcoming' })).toBeVisible();
+  await expect(page).toHaveURL(/\/dashboard/);
 });
