@@ -106,6 +106,17 @@ describe('NotificationsComponent', () => {
     request.flush(null);
   });
 
+  it('does not re-mark a reminder that is already read', async () => {
+    const fixture = await render([item({ isRead: true })]);
+
+    fixture.nativeElement
+      .querySelector('[data-testid="notification-link"]')
+      ?.click();
+    await TestBed.inject(ApplicationRef).whenStable();
+
+    expect(http.match('/api/notifications/n1/read')).toHaveLength(0);
+  });
+
   it('distinguishes a read reminder from an unread one', async () => {
     const fixture = await render([item({ id: 'n1' }), item({ id: 'n2', isRead: true })]);
 
@@ -120,6 +131,17 @@ describe('NotificationsComponent', () => {
     // Without this the row reads "$0.00 due", which looks like a bug
     // rather than like a bill that has been paid.
     expect(text(fixture)).toContain('Paid');
+  });
+
+  it('does not call an unpaid bill settled just because nothing is outstanding', async () => {
+    // isResolved and amountDue vary independently here on purpose. Every
+    // other fixture pairs `isResolved: true` with a zero amount, so without
+    // this case a template branching on `amountDue === 0` would pass the
+    // whole suite while calling an unpaid bill paid.
+    const fixture = await render([item({ isResolved: false, amountDue: 0 })]);
+
+    expect(text(fixture)).toContain('$0.00 due');
+    expect(text(fixture)).not.toContain('Paid');
   });
 
   it('clears everything with one action', async () => {
