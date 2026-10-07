@@ -4,12 +4,11 @@ import { provideZonelessChangeDetection } from '@angular/core';
 import { ComponentFixture, TestBed } from '@angular/core/testing';
 import { provideRouter, Router } from '@angular/router';
 import { MATERIAL_ANIMATIONS } from '@angular/material/core';
-import { MatDialog } from '@angular/material/dialog';
-import { of } from 'rxjs';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { SessionService } from '../core/auth/session.service';
 import { provideCalendarDateAdapter } from '../core/date/calendar-date.adapter';
 import { InstancesStore } from '../core/state/instances.store';
+import { ActionResult, InstanceActionsService } from './instance-actions.service';
 import { UpcomingComponent } from './upcoming.component';
 
 let http: HttpTestingController;
@@ -383,119 +382,102 @@ describe('the day boundary', () => {
 });
 
 /**
- * Spies on the dialog the component will actually use.
+ * Resolves the real `InstanceActionsService` the component will actually
+ * use, so a spy on it is a spy on the one call this component makes.
  *
  * It must take the fixture rather than reaching for `TestBed.inject`: with
- * `provideRouter` and `provideHttpClient` both present, `MatDialog`
- * (`providedIn: 'root'`) resolves to two distinct instances depending on
- * which injector asks first — the component's own and the TestBed module's.
- * Spying on the wrong one silently misses every call the component makes,
- * and the test then opens a real dialog that nothing ever closes.
+ * `provideRouter` and `provideHttpClient` both present, a `providedIn:
+ * 'root'` service resolves to two distinct instances depending on which
+ * injector asks first — the component's own and the TestBed module's.
+ * Spying on the wrong one silently misses every call the component makes.
  */
-function dialogReturning(
-  fixture: ComponentFixture<UpcomingComponent>,
-  value: unknown,
-) {
-  return vi
-    .spyOn(fixture.componentRef.injector.get(MatDialog), 'open')
-    .mockReturnValue({ afterClosed: () => of(value) } as never);
+function actionsService(fixture: ComponentFixture<UpcomingComponent>): InstanceActionsService {
+  return fixture.componentRef.injector.get(InstanceActionsService);
 }
 
-const payment = {
-  id: 'pay-1',
-  billInstanceId: 'inst-1',
-  amountPaid: 1200,
-  paidAt: '2026-10-01T12:00:00.000Z',
-  note: null,
-  reversesPaymentId: null,
-};
-
+/**
+ * The dialog wiring, the `PaymentsService` call, and the resulting row
+ * patch all now live in `InstanceActionsService` — proven once, in its own
+ * spec, and end-to-end (dialog through a real HTTP round trip) in
+ * `DayDetailComponent`'s spec. What belongs to this component is narrower:
+ * that it calls the service with the right instance, and reflects the
+ * result in `actionError`. A prior version of these tests drove a real
+ * `MatDialog` and flushed `HttpTestingController` directly from here; that
+ * coverage was retired as duplicate once the service owned it, rather than
+ * kept as a second copy.
+ */
 describe('payment actions', () => {
-  it('records a payment and patches the row from the response', async () => {
+  it('records a payment through the shared service and clears any existing error', async () => {
     const fixture = await createFixture();
-    dialogReturning(fixture, { note: null });
     instancesRequest().flush([base]);
     await fixture.whenStable();
     await fixture.whenStable();
 
-    const done = fixture.componentInstance.openPayment(base);
-    // The dialog's `afterClosed()` settles through its own promise hop
-    // before `openPayment` reaches the HTTP call, so the request does not
-    // exist yet on the tick `openPayment` is invoked.
-    await fixture.whenStable();
-    const req = http.expectOne('/api/bill-instances/inst-1/payments');
-    expect(req.request.body).toEqual({ note: null });
-    req.flush({ instance: { ...base, status: 'PAID', amountPaid: 1200 }, payment });
-    await done;
-    await fixture.whenStable();
-    await fixture.whenStable();
-
-    // A successful payment bumps `PaymentsService.mutations()`, which is
-    // exactly what `SummaryStore`'s own effect watches for — correctly, a
-    // payment changes every one of its buckets. The resulting background
-    // refetch is answered here so `http.verify()` finds nothing pending.
-    http.expectOne((r) => r.url === '/api/summary').flush(emptySummary);
-
-    expect(fixture.nativeElement.textContent).toContain('Paid');
-  });
-
-  it('shows a failed payment without changing the row', async () => {
-    const fixture = await createFixture();
-    dialogReturning(fixture, { note: null });
-    instancesRequest().flush([base]);
-    await fixture.whenStable();
-    await fixture.whenStable();
-
-    const done = fixture.componentInstance.openPayment(base);
-    await fixture.whenStable();
-    http
-      .expectOne('/api/bill-instances/inst-1/payments')
-      .flush({ message: 'Amount exceeds the balance' }, { status: 400, statusText: 'Bad Request' });
-    await done;
-    await fixture.whenStable();
-    await fixture.whenStable();
-
-    expect(fixture.componentInstance.actionError()).toContain('Amount exceeds the balance');
-    expect(fixture.nativeElement.textContent).toContain('Unpaid');
-  });
-
-  it('sends nothing when the dialog is dismissed', async () => {
-    const fixture = await createFixture();
-    dialogReturning(fixture, undefined);
-    instancesRequest().flush([base]);
-    await fixture.whenStable();
-    await fixture.whenStable();
+    const recordPayment = vi
+      .spyOn(actionsService(fixture), 'recordPayment')
+      .mockResolvedValue({ ok: true } satisfies ActionResult);
 
     await fixture.componentInstance.openPayment(base);
+    await fixture.whenStable();
 
-    expect(http.match('/api/bill-instances/inst-1/payments')).toHaveLength(0);
+    expect(recordPayment).toHaveBeenCalledWith(base);
+    expect(fixture.componentInstance.actionError()).toBeNull();
   });
 
-  it('clears payments and patches the row from the bare instance response', async () => {
+  it("shows the service's message when recording a payment fails", async () => {
+    const fixture = await createFixture();
+    instancesRequest().flush([base]);
+    await fixture.whenStable();
+    await fixture.whenStable();
+
+    vi.spyOn(actionsService(fixture), 'recordPayment').mockResolvedValue({
+      ok: false,
+      message: 'Amount exceeds the balance',
+    } satisfies ActionResult);
+
+    await fixture.componentInstance.openPayment(base);
+    await fixture.whenStable();
+
+    expect(fixture.componentInstance.actionError()).toBe('Amount exceeds the balance');
+    expect(fixture.nativeElement.querySelector('[role="alert"]')?.textContent).toContain(
+      'Amount exceeds the balance',
+    );
+  });
+
+  it('clears payments through the shared service and clears any existing error', async () => {
     const partiallyPaid = { ...base, status: 'PARTIALLY_PAID' as const, amountPaid: 500 };
     const fixture = await createFixture();
-    dialogReturning(fixture, 'confirm');
     instancesRequest().flush([partiallyPaid]);
     await fixture.whenStable();
     await fixture.whenStable();
 
-    const done = fixture.componentInstance.confirmUnpay(partiallyPaid);
-    // Same hop as openPayment above: the confirm dialog's afterClosed()
-    // settles before confirmUnpay reaches the HTTP call.
+    const clearPayments = vi
+      .spyOn(actionsService(fixture), 'clearPayments')
+      .mockResolvedValue({ ok: true } satisfies ActionResult);
+
+    await fixture.componentInstance.confirmUnpay(partiallyPaid);
     await fixture.whenStable();
-    const req = http.expectOne('/api/bill-instances/inst-1/unpay');
-    expect(req.request.method).toBe('POST');
-    req.flush({ ...base, status: 'UNPAID', amountPaid: 0 });
-    await done;
+
+    expect(clearPayments).toHaveBeenCalledWith(partiallyPaid);
+    expect(fixture.componentInstance.actionError()).toBeNull();
+  });
+
+  it("shows the service's message when clearing payments fails", async () => {
+    const partiallyPaid = { ...base, status: 'PARTIALLY_PAID' as const, amountPaid: 500 };
+    const fixture = await createFixture();
+    instancesRequest().flush([partiallyPaid]);
     await fixture.whenStable();
     await fixture.whenStable();
 
-    // Same background refetch as above: `unpay` also bumps
-    // `PaymentsService.mutations()`.
-    http.expectOne((r) => r.url === '/api/summary').flush(emptySummary);
+    vi.spyOn(actionsService(fixture), 'clearPayments').mockResolvedValue({
+      ok: false,
+      message: 'Already clear',
+    } satisfies ActionResult);
 
-    expect(fixture.nativeElement.textContent).toContain('Unpaid');
-    expect(fixture.nativeElement.textContent).not.toContain('paid of');
+    await fixture.componentInstance.confirmUnpay(partiallyPaid);
+    await fixture.whenStable();
+
+    expect(fixture.componentInstance.actionError()).toBe('Already clear');
   });
 });
 

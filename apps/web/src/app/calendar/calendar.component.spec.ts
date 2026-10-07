@@ -379,3 +379,20 @@ describe('CalendarComponent keyboard navigation', () => {
     });
   });
 });
+
+describe('CalendarComponent drill-down', () => {
+  it('opens a day panel listing that day’s bills when the cell is clicked', async () => {
+    const fixture = await render();
+    fixture.nativeElement.querySelector('[data-date="2026-10-09"]').click();
+    await fixture.whenStable();
+
+    const panel = fixture.nativeElement.querySelector('app-day-detail');
+    expect(panel).not.toBeNull();
+    expect(panel.textContent).toContain('Rent');
+  });
+
+  it('shows no panel until a day is chosen', async () => {
+    const fixture = await render();
+    expect(fixture.nativeElement.querySelector('app-day-detail')).toBeNull();
+  });
+});

@@ -24,6 +24,7 @@ import {
 } from '../core/date/calendar-date';
 import { isSameMonth, monthGrid } from '../core/date/month-grid';
 import { TODAY } from '../core/date/today.token';
+import { DayDetailComponent } from './day-detail.component';
 
 /** How many bills a cell shows before collapsing the rest into a count. */
 const MAX_CHIPS = 3;
@@ -47,7 +48,7 @@ interface DayCell {
 
 @Component({
   selector: 'app-calendar',
-  imports: [MatButtonModule, MatIconModule, MatProgressBarModule],
+  imports: [MatButtonModule, MatIconModule, MatProgressBarModule, DayDetailComponent],
   template: `
     <header class="page-header">
       <h1>{{ monthLabel() }}</h1>
@@ -115,7 +116,9 @@ interface DayCell {
       }
     </div>
 
-    <ng-content />
+    @if (selected(); as day) {
+      <app-day-detail [date]="day" [instances]="instancesFor(day)" />
+    }
   `,
   styles: `
     .nav {

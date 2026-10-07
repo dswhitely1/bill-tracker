@@ -11,30 +11,25 @@ import { FormBuilder, ReactiveFormsModule } from '@angular/forms';
 import { ActivatedRoute, Router } from '@angular/router';
 import { MatButtonModule } from '@angular/material/button';
 import { MatDatepickerModule } from '@angular/material/datepicker';
-import { MatDialog, MatDialogModule } from '@angular/material/dialog';
 import { MatExpansionModule } from '@angular/material/expansion';
 import { MatFormFieldModule } from '@angular/material/form-field';
 import { MatInputModule } from '@angular/material/input';
 import { MatProgressBarModule } from '@angular/material/progress-bar';
 import { MatSelectModule } from '@angular/material/select';
-import { debounceTime, distinctUntilChanged, firstValueFrom, map } from 'rxjs';
+import { debounceTime, distinctUntilChanged, map } from 'rxjs';
 import { BILL_STATUSES } from '@bill-tracker/shared-types';
 import type { BillInstanceResponse, BillStatus } from '@bill-tracker/shared-types';
-import { errorMessage } from '../core/api/api-error';
 import { CalendarDate, compare, today } from '../core/date/calendar-date';
 import { CalendarDatePipe } from '../core/date/calendar-date.pipe';
 import { BillsStore } from '../core/state/bills.store';
 import { CategoriesStore } from '../core/state/categories.store';
 import { InstancesStore, rangeError } from '../core/state/instances.store';
-import { PaymentsService } from '../core/state/payments.service';
 import { SummaryStore } from '../core/state/summary.store';
-import { ConfirmDialogComponent, ConfirmDialogResult } from '../shared/confirm-dialog.component';
 import { EmptyStateComponent } from '../shared/empty-state.component';
 import { formatMoney } from '../shared/money';
-import { NotificationService } from '../shared/notification.service';
 import { SORT_LABELS, filterInstances, sortInstances } from './instance-filters';
+import { InstanceActionsService } from './instance-actions.service';
 import { InstanceRowComponent, STATUS_LABELS } from './instance-row.component';
-import { PaymentDialogComponent, PaymentDialogResult } from './payment-dialog.component';
 import { PaymentHistoryComponent } from './payment-history.component';
 import {
   NO_CATEGORY,
@@ -58,7 +53,6 @@ function serverQueryKey(p: UpcomingParams): string {
     ReactiveFormsModule,
     MatButtonModule,
     MatDatepickerModule,
-    MatDialogModule,
     MatExpansionModule,
     MatFormFieldModule,
     MatInputModule,
@@ -263,9 +257,7 @@ export class UpcomingComponent {
   private readonly router = inject(Router);
   private readonly fb = inject(FormBuilder);
   private readonly destroyRef = inject(DestroyRef);
-  private readonly dialog = inject(MatDialog);
-  private readonly payments = inject(PaymentsService);
-  private readonly notifications = inject(NotificationService);
+  private readonly actions = inject(InstanceActionsService);
 
   protected readonly statuses = BILL_STATUSES;
   protected readonly statusLabels = STATUS_LABELS;
@@ -495,56 +487,20 @@ export class UpcomingComponent {
     void this.store.refresh();
   }
 
+  /**
+   * The dialog wiring, the `PaymentsService` call, and the success
+   * notification all live in `InstanceActionsService` now — shared with
+   * `DayDetailComponent`'s calendar drill-down, so the same rule enforced
+   * here cannot go missing there.
+   */
   async openPayment(instance: BillInstanceResponse): Promise<void> {
-    const result = await firstValueFrom(
-      this.dialog
-        .open<PaymentDialogComponent, unknown, PaymentDialogResult | undefined>(
-          PaymentDialogComponent,
-          { data: { instance } },
-        )
-        .afterClosed(),
-    );
-    if (!result) return;
-
-    try {
-      const { instance: updated } = await this.payments.record(instance.id, result);
-      this.actionError.set(null);
-      this.notifications.success(
-        updated.status === 'PAID'
-          ? `${updated.billName} is paid`
-          : `Recorded a payment for ${updated.billName}`,
-      );
-    } catch (error: unknown) {
-      this.actionError.set(errorMessage(error));
-    }
+    const result = await this.actions.recordPayment(instance);
+    this.actionError.set(result.ok ? null : result.message);
   }
 
-  /**
-   * `unpay` writes reversals for every live payment rather than deleting
-   * rows, so the history survives. The dialog says so, because "clear"
-   * otherwise sounds like it erases the record.
-   */
   async confirmUnpay(instance: BillInstanceResponse): Promise<void> {
-    const choice = await firstValueFrom(
-      this.dialog
-        .open<ConfirmDialogComponent, unknown, ConfirmDialogResult>(ConfirmDialogComponent, {
-          data: {
-            title: `Clear payments for ${instance.billName}?`,
-            message:
-              'This records a reversal for each payment. The original entries stay in the history.',
-            confirmLabel: 'Clear payments',
-          },
-        })
-        .afterClosed(),
-    );
-    if (choice !== 'confirm') return;
-
-    try {
-      await this.payments.unpay(instance.id);
-      this.actionError.set(null);
-    } catch (error: unknown) {
-      this.actionError.set(errorMessage(error));
-    }
+    const result = await this.actions.clearPayments(instance);
+    this.actionError.set(result.ok ? null : result.message);
   }
 
   /**
