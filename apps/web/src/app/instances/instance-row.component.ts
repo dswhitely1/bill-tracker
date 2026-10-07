@@ -4,7 +4,7 @@ import type { BillInstanceResponse, BillStatus } from '@bill-tracker/shared-type
 import { CalendarDatePipe } from '../core/date/calendar-date.pipe';
 import { formatMoney } from '../shared/money';
 
-const STATUS_LABELS: Record<BillStatus, string> = {
+export const STATUS_LABELS: Record<BillStatus, string> = {
   UNPAID: 'Unpaid',
   PARTIALLY_PAID: 'Partly paid',
   PAID: 'Paid',

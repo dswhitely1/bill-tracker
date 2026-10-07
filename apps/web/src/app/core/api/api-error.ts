@@ -18,7 +18,14 @@ export function isValidationErrorResponse(body: unknown): body is ValidationErro
   if (typeof body !== 'object' || body === null) return false;
   const errors = (body as { errors?: unknown }).errors;
   if (typeof errors !== 'object' || errors === null || Array.isArray(errors)) return false;
-  return Object.values(errors).every(
+  const values = Object.values(errors);
+  // An empty map would otherwise pass every check below vacuously: a 400
+  // with `errors: {}` would be "recognised" as field-level, so
+  // applyServerErrors would attach nothing to any control and return
+  // nothing to show in a banner either — exactly the "rejects a
+  // submission and shows nothing" failure this type exists to avoid.
+  if (values.length === 0) return false;
+  return values.every(
     (messages) => Array.isArray(messages) && messages.every((m) => typeof m === 'string'),
   );
 }

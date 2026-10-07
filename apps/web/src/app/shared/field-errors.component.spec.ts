@@ -64,6 +64,35 @@ describe('FieldErrorsComponent', () => {
     expect(fixture.nativeElement.textContent).toContain(String(MAX_AMOUNT));
   });
 
+  it('shows a message when the control is touched after the first render', async () => {
+    // Regression: the component is OnPush and reads control.touched/errors
+    // directly, neither of which is a signal. Marking touched *after* the
+    // initial settle must still schedule a re-render.
+    const fixture = TestBed.createComponent(Host);
+    await fixture.whenStable();
+    expect(fixture.nativeElement.textContent.trim()).toBe('');
+
+    fixture.componentInstance.control().markAllAsTouched();
+    await fixture.whenStable();
+
+    expect(fixture.nativeElement.textContent).toContain('Name is required');
+  });
+
+  it('shows a server error attached after the first render', async () => {
+    // Regression: a server error applied to an already-rendered control
+    // (the applyServerErrors path) must also trigger a re-render.
+    const fixture = TestBed.createComponent(Host);
+    const control = fixture.componentInstance.control();
+    await fixture.whenStable();
+    expect(fixture.nativeElement.textContent.trim()).toBe('');
+
+    control.setErrors({ server: 'That name is already taken' });
+    control.markAsTouched();
+    await fixture.whenStable();
+
+    expect(fixture.nativeElement.textContent).toContain('That name is already taken');
+  });
+
   it('falls back to a generic sentence for a validator it does not know', async () => {
     const fixture = TestBed.createComponent(Host);
     const control = fixture.componentInstance.control();

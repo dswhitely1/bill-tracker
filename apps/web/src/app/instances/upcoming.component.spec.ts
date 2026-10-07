@@ -33,6 +33,16 @@ function instancesRequest() {
   return http.expectOne((r) => r.url === '/api/bill-instances');
 }
 
+/**
+ * The component loads `BillsStore` in its constructor (for the bill
+ * filter's options), alongside its own instances request. Every test that
+ * creates the fixture must answer this request too, or `http.verify()`
+ * fails on an outstanding call.
+ */
+function billsRequest() {
+  return http.expectOne((r) => r.url === '/api/bills');
+}
+
 beforeEach(() => {
   TestBed.configureTestingModule({
     imports: [UpcomingComponent],
@@ -59,6 +69,7 @@ afterEach(() => {
 describe('UpcomingComponent', () => {
   it('lists instances with their bill name, due date, and amount', async () => {
     const fixture = TestBed.createComponent(UpcomingComponent);
+    billsRequest().flush([]);
     await fixture.whenStable();
     instancesRequest().flush([base]);
     await fixture.whenStable();
@@ -77,6 +88,7 @@ describe('UpcomingComponent', () => {
 
   it('defaults to the current month', async () => {
     const fixture = TestBed.createComponent(UpcomingComponent);
+    billsRequest().flush([]);
     await fixture.whenStable();
 
     const req = instancesRequest();
@@ -89,6 +101,7 @@ describe('UpcomingComponent', () => {
 
   it('names the empty state rather than rendering a blank table', async () => {
     const fixture = TestBed.createComponent(UpcomingComponent);
+    billsRequest().flush([]);
     await fixture.whenStable();
     instancesRequest().flush([]);
     await fixture.whenStable();
@@ -99,6 +112,7 @@ describe('UpcomingComponent', () => {
 
   it('shows the amount still owed on a partially paid instance', async () => {
     const fixture = TestBed.createComponent(UpcomingComponent);
+    billsRequest().flush([]);
     await fixture.whenStable();
     instancesRequest().flush([
       { ...base, status: 'PARTIALLY_PAID', amountPaid: 500 },
@@ -117,6 +131,7 @@ describe('overdue comes from the server', () => {
     // calendar day, so a locally derived badge would disagree with the
     // API on exactly the rows a person cares most about.
     const fixture = TestBed.createComponent(UpcomingComponent);
+    billsRequest().flush([]);
     await fixture.whenStable();
     instancesRequest().flush([{ ...base, dueDate: '2099-01-01', isOverdue: true }]);
     await fixture.whenStable();
@@ -130,6 +145,7 @@ describe('overdue comes from the server', () => {
 
   it('does not mark a row overdue when the server says it is not, however old it is', async () => {
     const fixture = TestBed.createComponent(UpcomingComponent);
+    billsRequest().flush([]);
     await fixture.whenStable();
     instancesRequest().flush([{ ...base, dueDate: '2000-01-01', isOverdue: false }]);
     await fixture.whenStable();
@@ -142,6 +158,7 @@ describe('overdue comes from the server', () => {
 describe('the range controls', () => {
   it('refuses an over-wide range with a message and sends nothing', async () => {
     const fixture = TestBed.createComponent(UpcomingComponent);
+    billsRequest().flush([]);
     await fixture.whenStable();
     instancesRequest().flush([base]);
     await fixture.whenStable();
@@ -158,6 +175,7 @@ describe('the range controls', () => {
 
   it('applies a valid range', async () => {
     const fixture = TestBed.createComponent(UpcomingComponent);
+    billsRequest().flush([]);
     await fixture.whenStable();
     instancesRequest().flush([]);
     await fixture.whenStable();
@@ -172,11 +190,49 @@ describe('the range controls', () => {
   });
 });
 
+describe('the bill filter', () => {
+  // Spec §11 requires status, overdue, and billId; the store and API
+  // already support billId (store spec proves it reaches the wire), but
+  // the component rendered no control for it.
+  it('puts the chosen bill id on the request', async () => {
+    const fixture = TestBed.createComponent(UpcomingComponent);
+    billsRequest().flush([{ id: 'bill-1', categoryId: null, name: 'Rent', defaultAmount: 1200, frequency: 'MONTHLY', startDate: '2026-01-01', endDate: null, isActive: true }]);
+    await fixture.whenStable();
+    instancesRequest().flush([]);
+    await fixture.whenStable();
+    await fixture.whenStable();
+
+    fixture.componentInstance.setBillId('bill-1');
+    const applied = fixture.componentInstance.applyRange();
+    const req = instancesRequest();
+    expect(req.request.params.get('billId')).toBe('bill-1');
+    req.flush([]);
+    await applied;
+  });
+
+  it('omits billId when "Any bill" is selected', async () => {
+    const fixture = TestBed.createComponent(UpcomingComponent);
+    billsRequest().flush([]);
+    await fixture.whenStable();
+    instancesRequest().flush([]);
+    await fixture.whenStable();
+    await fixture.whenStable();
+
+    fixture.componentInstance.setBillId(null);
+    const applied = fixture.componentInstance.applyRange();
+    const req = instancesRequest();
+    expect(req.request.params.has('billId')).toBe(false);
+    req.flush([]);
+    await applied;
+  });
+});
+
 describe('the day boundary', () => {
   it('refetches when the browser day has changed since the rows were fetched', async () => {
     // `isOverdue` goes stale at midnight. A tab left open overnight would
     // otherwise show yesterday's answer indefinitely.
     const fixture = TestBed.createComponent(UpcomingComponent);
+    billsRequest().flush([]);
     await fixture.whenStable();
     instancesRequest().flush([base]);
     await fixture.whenStable();
@@ -197,6 +253,7 @@ describe('the day boundary', () => {
 
   it('does not refetch when the day is unchanged', async () => {
     const fixture = TestBed.createComponent(UpcomingComponent);
+    billsRequest().flush([]);
     await fixture.whenStable();
     instancesRequest().flush([base]);
     await fixture.whenStable();
@@ -217,6 +274,7 @@ describe('the day boundary', () => {
     // rows were fresh. The store now owns the marker and only advances it
     // on a fetch that actually succeeds.
     const fixture = TestBed.createComponent(UpcomingComponent);
+    billsRequest().flush([]);
     await fixture.whenStable();
     instancesRequest().flush([base]);
     await fixture.whenStable();
@@ -270,6 +328,7 @@ const payment = {
 describe('payment actions', () => {
   it('records a payment and patches the row from the response', async () => {
     const fixture = TestBed.createComponent(UpcomingComponent);
+    billsRequest().flush([]);
     dialogReturning(fixture, { note: null });
     await fixture.whenStable();
     instancesRequest().flush([base]);
@@ -293,6 +352,7 @@ describe('payment actions', () => {
 
   it('shows a failed payment without changing the row', async () => {
     const fixture = TestBed.createComponent(UpcomingComponent);
+    billsRequest().flush([]);
     dialogReturning(fixture, { note: null });
     await fixture.whenStable();
     instancesRequest().flush([base]);
@@ -314,6 +374,7 @@ describe('payment actions', () => {
 
   it('sends nothing when the dialog is dismissed', async () => {
     const fixture = TestBed.createComponent(UpcomingComponent);
+    billsRequest().flush([]);
     dialogReturning(fixture, undefined);
     await fixture.whenStable();
     instancesRequest().flush([base]);
@@ -328,6 +389,7 @@ describe('payment actions', () => {
   it('clears payments and patches the row from the bare instance response', async () => {
     const partiallyPaid = { ...base, status: 'PARTIALLY_PAID' as const, amountPaid: 500 };
     const fixture = TestBed.createComponent(UpcomingComponent);
+    billsRequest().flush([]);
     dialogReturning(fixture, 'confirm');
     await fixture.whenStable();
     instancesRequest().flush([partiallyPaid]);

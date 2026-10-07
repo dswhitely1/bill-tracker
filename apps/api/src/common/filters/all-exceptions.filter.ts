@@ -21,13 +21,14 @@ function titleCaseReason(status: HttpStatus): string {
 }
 
 function isFieldErrorMap(value: unknown): value is Record<string, string[]> {
-  return (
-    typeof value === 'object' &&
-    value !== null &&
-    !Array.isArray(value) &&
-    Object.values(value).every(
-      (messages) => Array.isArray(messages) && messages.every((m) => typeof m === 'string'),
-    )
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) return false;
+  const values = Object.values(value);
+  // An empty map would otherwise pass vacuously: `errors: {}` would be
+  // forwarded as field-level errors, so a client attaches nothing to any
+  // control and shows nothing in a banner either.
+  if (values.length === 0) return false;
+  return values.every(
+    (messages) => Array.isArray(messages) && messages.every((m) => typeof m === 'string'),
   );
 }
 

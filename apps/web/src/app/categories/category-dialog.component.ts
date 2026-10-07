@@ -1,4 +1,4 @@
-import { ChangeDetectionStrategy, Component, inject, signal } from '@angular/core';
+import { ChangeDetectionStrategy, Component, inject } from '@angular/core';
 import { FormBuilder, ReactiveFormsModule, Validators } from '@angular/forms';
 import { MAT_DIALOG_DATA, MatDialogModule, MatDialogRef } from '@angular/material/dialog';
 import { MatButtonModule } from '@angular/material/button';
@@ -71,8 +71,6 @@ export class CategoryDialogComponent {
     ],
     color: [this.data.category?.color ?? '#2f80ed'],
   });
-
-  readonly saving = signal(false);
 
   save(): void {
     if (this.form.invalid) {

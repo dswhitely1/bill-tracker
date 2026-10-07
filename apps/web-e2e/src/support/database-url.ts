@@ -7,4 +7,5 @@
  * it starts) both import this constant rather than each carrying their
  * own copy — two copies of a connection string drift.
  */
-export const E2E_DATABASE_URL = 'postgres://don:super@localhost:5432/bills_web_e2e';
+export const E2E_DATABASE_URL =
+  process.env['E2E_DATABASE_URL'] ?? 'postgres://don:super@localhost:5432/bills_web_e2e';

@@ -159,6 +159,21 @@ describe('AllExceptionsFilter and field errors', () => {
     expect(json.mock.calls[0][0]).not.toHaveProperty('errors');
   });
 
+  it('ignores an empty errors map, rather than forwarding a field failure with nothing in it', () => {
+    // An empty object would otherwise pass the shape check vacuously and
+    // be forwarded as `errors: {}` — a client would then attach nothing
+    // to any control and show nothing in a banner either.
+    const { host, json } = hostFor();
+    const exception = new HttpException(
+      { statusCode: 400, error: 'Bad Request', message: 'nope', errors: {} },
+      HttpStatus.BAD_REQUEST,
+    );
+
+    new AllExceptionsFilter().catch(exception, host);
+
+    expect(json.mock.calls[0][0]).not.toHaveProperty('errors');
+  });
+
   it('ignores an errors value that is not a map of string arrays', () => {
     const { host, json } = hostFor();
     const exception = new HttpException(

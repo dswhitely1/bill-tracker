@@ -69,6 +69,13 @@
         "watch": false
       }
     },
+    "test-tz": {
+      "executor": "nx:run-commands",
+      "cache": false,
+      "options": {
+        "command": "TZ=Pacific/Pago_Pago nx test web --skip-nx-cache --include='app/core/date/**/*.spec.ts'"
+      }
+    },
     "serve-static": {
       "continuous": true,
       "executor": "@nx/web:file-server",

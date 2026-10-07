@@ -72,7 +72,13 @@ test('a visitor whose refresh fails is told why', async ({ page }) => {
     body: JSON.stringify({ statusCode: 401, message: 'Unauthorized' }),
   };
 
-  await page.route(/\/api\/bills(\?|$)/, (route) => route.fulfill(unauthorized));
+  // Categories, not bills: the Upcoming screen (where registerAndSignIn
+  // lands) now loads BillsStore too, for its bill filter — so by the time
+  // these routes are installed, BillsStore is already loaded and clicking
+  // "Bills" would serve its cached data without a new network call,
+  // never tripping this route at all. CategoriesStore is loaded only by
+  // the Bills screen, so it is still a guaranteed fresh request here.
+  await page.route(/\/api\/categories(\?|$)/, (route) => route.fulfill(unauthorized));
   await page.route(/\/api\/auth\/refresh/, (route) => route.fulfill(unauthorized));
 
   // Same reasoning as the test above: an in-app navigation, not a hard

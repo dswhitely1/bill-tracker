@@ -1,4 +1,4 @@
-import { ChangeDetectionStrategy, Component, input } from '@angular/core';
+import { ChangeDetectionStrategy, Component, computed, effect, input, signal } from '@angular/core';
 import { AbstractControl } from '@angular/forms';
 import { MatFormFieldModule } from '@angular/material/form-field';
 
@@ -28,7 +28,27 @@ export class FieldErrorsComponent {
   readonly control = input.required<AbstractControl>();
   readonly label = input('This field');
 
-  message(): string | null {
+  /**
+   * Bumped every time the bound control reports a state change (value,
+   * status, pristine, or touched). `control` is a stable object reference
+   * that signals never see mutate on their own, so without this tick the
+   * `message` computed below would never re-run past its first read: the
+   * component would freeze on whatever `touched`/`errors` looked like at
+   * first render and never show a message a user marks or a server error
+   * attaches afterward.
+   */
+  private readonly tick = signal(0);
+
+  constructor() {
+    effect((onCleanup) => {
+      const control = this.control();
+      const subscription = control.events.subscribe(() => this.tick.update((n) => n + 1));
+      onCleanup(() => subscription.unsubscribe());
+    });
+  }
+
+  readonly message = computed((): string | null => {
+    this.tick();
     const control = this.control();
     if (!control.touched || control.errors === null) return null;
 
@@ -49,5 +69,5 @@ export class FieldErrorsComponent {
     if (errors['matDatepickerParse']) return `${name} must be a date, as YYYY-MM-DD`;
 
     return `${name} is not valid`;
-  }
+  });
 }

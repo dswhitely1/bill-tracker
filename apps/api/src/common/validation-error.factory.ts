@@ -47,6 +47,13 @@ export function flattenToFieldErrors(
  * produced — parent messages before their children's, in declaration order —
  * so every existing assertion against a 400 body continues to pass. `errors`
  * is additive.
+ *
+ * That equivalence has a limit worth naming: `message` is rebuilt from the
+ * grouped `fieldErrors` map, not from a depth-first walk of `errors`
+ * itself, so it would interleave differently from Nest's default if two
+ * sibling `ValidationError`s ever resolved to the same dotted path (as
+ * array-element validation can produce). It is equivalent for every DTO
+ * in this repo today.
  */
 export function validationExceptionFactory(errors: ValidationError[]): BadRequestException {
   const fieldErrors = flattenToFieldErrors(errors);

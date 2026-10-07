@@ -76,6 +76,25 @@ describe('PaymentDialogComponent', () => {
     expect(await loader.getHarnessOrNull(AMOUNT_FIELD)).not.toBeNull();
   });
 
+  it('will not record a null amount when the field is cleared', async () => {
+    // Regression: amount had no `required` validator, so clearing it left
+    // the form valid and save() closed with `{ amount: null }`. The server
+    // treats a null amount as "pay the full balance" (payments.service's
+    // `dto.amount ?? balance`), so this used to record the whole balance
+    // for a partial payment the user never typed.
+    await (await loader.getHarness(MatCheckboxHarness)).uncheck();
+    await fixture.whenStable();
+
+    await (await loader.getHarness(AMOUNT_FIELD)).setValue('');
+    await fixture.whenStable();
+
+    expect(fixture.componentInstance.form.invalid).toBe(true);
+
+    fixture.componentInstance.save();
+
+    expect(close).not.toHaveBeenCalled();
+  });
+
   it('sends a typed partial amount as a number', async () => {
     await (await loader.getHarness(MatCheckboxHarness)).uncheck();
     await fixture.whenStable();

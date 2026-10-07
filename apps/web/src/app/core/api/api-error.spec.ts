@@ -40,6 +40,23 @@ describe('isValidationErrorResponse', () => {
     expect(isValidationErrorResponse({ errors: { name: 'nope' }, message: [] })).toBe(false);
   });
 
+  it('rejects an empty errors map, which would attach nothing to any control', () => {
+    // An empty object would otherwise pass every check vacuously, which
+    // would make applyServerErrors attach nothing and return nothing to
+    // show in a banner either — a rejected submission with no visible
+    // reason.
+    expect(
+      isValidationErrorResponse({
+        statusCode: 400,
+        error: 'Bad Request',
+        message: [],
+        errors: {},
+        path: '/api/bills',
+        timestamp: '2026-10-06T00:00:00.000Z',
+      }),
+    ).toBe(false);
+  });
+
   it('rejects null, undefined, and a string', () => {
     expect(isValidationErrorResponse(null)).toBe(false);
     expect(isValidationErrorResponse(undefined)).toBe(false);

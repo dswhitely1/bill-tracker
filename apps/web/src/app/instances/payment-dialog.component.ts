@@ -1,5 +1,6 @@
 import { ChangeDetectionStrategy, Component, inject } from '@angular/core';
-import { FormBuilder, ReactiveFormsModule, Validators } from '@angular/forms';
+import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
+import { FormBuilder, ReactiveFormsModule } from '@angular/forms';
 import { MAT_DIALOG_DATA, MatDialogModule, MatDialogRef } from '@angular/material/dialog';
 import { MatButtonModule } from '@angular/material/button';
 import { MatCheckboxModule } from '@angular/material/checkbox';
@@ -7,7 +8,7 @@ import { MatFormFieldModule } from '@angular/material/form-field';
 import { MatInputModule } from '@angular/material/input';
 import type { BillInstanceResponse } from '@bill-tracker/shared-types';
 import { FieldErrorsComponent } from '../shared/field-errors.component';
-import { MAX_AMOUNT, MIN_AMOUNT, formatMoney } from '../shared/money';
+import { MAX_AMOUNT, MIN_AMOUNT, amountValidators, formatMoney } from '../shared/money';
 
 export interface PaymentDialogData {
   instance: BillInstanceResponse;
@@ -93,12 +94,26 @@ export class PaymentDialogComponent {
 
   readonly form = this.fb.nonNullable.group({
     payInFull: [true],
-    amount: [
-      this.data.instance.amount - this.data.instance.amountPaid,
-      [Validators.min(MIN_AMOUNT), Validators.max(MAX_AMOUNT)],
-    ],
+    amount: [this.data.instance.amount - this.data.instance.amountPaid, amountValidators],
     note: this.fb.control<string | null>(null),
   });
+
+  constructor() {
+    // The amount control carries `required` (shared/money's amountValidators)
+    // so clearing it cannot silently fall through to "pay the full balance"
+    // (see payments.service's `dto.amount ?? balance`). Disabling it while
+    // paying in full keeps that validator from blocking submission when the
+    // field is hidden and irrelevant — `getRawValue()` still reports a
+    // disabled control's value, so `save()` is unaffected.
+    this.form.controls.amount.disable();
+    this.form.controls.payInFull.valueChanges.pipe(takeUntilDestroyed()).subscribe((payInFull) => {
+      if (payInFull) {
+        this.form.controls.amount.disable();
+      } else {
+        this.form.controls.amount.enable();
+      }
+    });
+  }
 
   /**
    * "Pay in full" omits `amount` entirely rather than sending the figure
@@ -107,6 +122,11 @@ export class PaymentDialogComponent {
    * else has paid part of this instance since the dialog opened.
    */
   save(): void {
+    if (this.form.invalid) {
+      this.form.markAllAsTouched();
+      return;
+    }
+
     const { payInFull, amount, note } = this.form.getRawValue();
     this.dialogRef.close({
       ...(payInFull ? {} : { amount }),

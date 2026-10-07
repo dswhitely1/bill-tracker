@@ -156,6 +156,40 @@ describe('PaymentHistoryComponent', () => {
     expect(fixture.nativeElement.textContent).toContain('already been reversed');
   });
 
+  it('does not reject when the post-conflict reload itself fails', async () => {
+    // Regression: reverse()'s catch block awaited payments.reload() with
+    // nothing to catch a failure there — a second error on the recovery
+    // path used to escape as an unhandled rejection from a template click
+    // handler instead of surfacing in this component's own error signal.
+    const fixture = render();
+    await fixture.whenStable();
+    http.expectOne('/api/bill-instances/inst-1/payments').flush([paid]);
+    await fixture.whenStable();
+    await fixture.whenStable();
+
+    const done = fixture.componentInstance.reverse(paid);
+    http.expectOne('/api/bill-instances/inst-1/payments/pay-1/reverse').flush(
+      { message: 'This payment has already been reversed' },
+      { status: 409, statusText: 'Conflict' },
+    );
+    await fixture.whenStable();
+    await fixture.whenStable();
+    http
+      .expectOne('/api/bill-instances/inst-1')
+      .flush({ message: 'Instance not found' }, { status: 404, statusText: 'Not Found' });
+    await fixture.whenStable();
+    await fixture.whenStable();
+    http.expectOne('/api/bill-instances/inst-1/payments').flush([paid]);
+
+    // reverse() must settle, not reject, even though both the original
+    // request and its recovery failed.
+    await expect(done).resolves.toBeUndefined();
+    await fixture.whenStable();
+    await fixture.whenStable();
+
+    expect(fixture.componentInstance.error()).toContain('Instance not found');
+  });
+
   it('re-fetches an open history after a payment is recorded elsewhere', async () => {
     // The payment dialog and this history component are siblings under
     // the same expanded row. Recording a payment there patches only the

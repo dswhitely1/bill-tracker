@@ -19,12 +19,13 @@ import { BILL_STATUSES } from '@bill-tracker/shared-types';
 import type { BillInstanceResponse, BillStatus } from '@bill-tracker/shared-types';
 import { errorMessage } from '../core/api/api-error';
 import { CalendarDate, today } from '../core/date/calendar-date';
+import { BillsStore } from '../core/state/bills.store';
 import { InstancesStore } from '../core/state/instances.store';
 import { PaymentsService } from '../core/state/payments.service';
 import { ConfirmDialogComponent, ConfirmDialogResult } from '../shared/confirm-dialog.component';
 import { EmptyStateComponent } from '../shared/empty-state.component';
 import { NotificationService } from '../shared/notification.service';
-import { InstanceRowComponent } from './instance-row.component';
+import { InstanceRowComponent, STATUS_LABELS } from './instance-row.component';
 import { PaymentDialogComponent, PaymentDialogResult } from './payment-dialog.component';
 import { PaymentHistoryComponent } from './payment-history.component';
 
@@ -69,7 +70,7 @@ import { PaymentHistoryComponent } from './payment-history.component';
         <mat-select [value]="status()" (valueChange)="setStatus($event)">
           <mat-option [value]="null">Any</mat-option>
           @for (value of statuses; track value) {
-            <mat-option [value]="value">{{ value }}</mat-option>
+            <mat-option [value]="value">{{ statusLabels[value] }}</mat-option>
           }
         </mat-select>
       </mat-form-field>
@@ -80,6 +81,16 @@ import { PaymentHistoryComponent } from './payment-history.component';
           <mat-option [value]="null">Any</mat-option>
           <mat-option [value]="true">Overdue only</mat-option>
           <mat-option [value]="false">Not overdue</mat-option>
+        </mat-select>
+      </mat-form-field>
+
+      <mat-form-field>
+        <mat-label>Bill</mat-label>
+        <mat-select [value]="billId()" (valueChange)="setBillId($event)">
+          <mat-option [value]="null">Any bill</mat-option>
+          @for (bill of bills.bills(); track bill.id) {
+            <mat-option [value]="bill.id">{{ bill.name }}</mat-option>
+          }
         </mat-select>
       </mat-form-field>
 
@@ -158,6 +169,7 @@ import { PaymentHistoryComponent } from './payment-history.component';
 })
 export class UpcomingComponent {
   protected readonly store = inject(InstancesStore);
+  protected readonly bills = inject(BillsStore);
   private readonly fb = inject(FormBuilder);
   private readonly destroyRef = inject(DestroyRef);
   private readonly dialog = inject(MatDialog);
@@ -165,9 +177,11 @@ export class UpcomingComponent {
   private readonly notifications = inject(NotificationService);
 
   protected readonly statuses = BILL_STATUSES;
+  protected readonly statusLabels = STATUS_LABELS;
 
   readonly status = signal<BillStatus | null>(null);
   readonly overdue = signal<boolean | null>(null);
+  readonly billId = signal<string | null>(null);
   readonly actionError = signal<string | null>(null);
 
   readonly rangeForm = this.fb.nonNullable.group({
@@ -176,6 +190,7 @@ export class UpcomingComponent {
   });
 
   constructor() {
+    void this.bills.load();
     void this.load();
 
     const onFocus = (): void => this.refreshIfDayChanged();
@@ -193,6 +208,10 @@ export class UpcomingComponent {
 
   setOverdue(value: boolean | null): void {
     this.overdue.set(value);
+  }
+
+  setBillId(value: string | null): void {
+    this.billId.set(value);
   }
 
   /**
@@ -275,6 +294,7 @@ export class UpcomingComponent {
       to,
       ...(this.status() === null ? {} : { status: this.status() as BillStatus }),
       ...(this.overdue() === null ? {} : { overdue: this.overdue() as boolean }),
+      ...(this.billId() === null ? {} : { billId: this.billId() as string }),
     });
   }
 }

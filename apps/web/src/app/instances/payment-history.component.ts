@@ -108,8 +108,16 @@ export class PaymentHistoryComponent {
       this.error.set(errorMessage(error));
       // A conflict means the local view and the server disagree. Showing
       // the error beside a stale list is worse than either alone, so both
-      // the instance and the log are re-read.
-      await this.payments.reload(this.instanceId());
+      // the instance and the log are re-read. `load()` already guards its
+      // own failure; `reload()` does not, and this handler runs from a
+      // template click with nothing further to catch a rejection, so a
+      // failure here is caught and folded into the same error signal
+      // rather than escaping as an unhandled rejection.
+      try {
+        await this.payments.reload(this.instanceId());
+      } catch (reloadError: unknown) {
+        this.error.set(errorMessage(reloadError));
+      }
       await this.load(this.instanceId());
     }
   }

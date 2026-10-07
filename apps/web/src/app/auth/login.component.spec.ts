@@ -72,6 +72,21 @@ describe('LoginComponent', () => {
     expect(navigate).toHaveBeenCalledWith('/upcoming');
   });
 
+  it('renders the required-field message after submitting an empty form', async () => {
+    // Regression: field-errors.component is OnPush and reads
+    // control.touched/errors directly, neither of which is a signal, so
+    // marking all controls touched after the first render used to never
+    // repaint. Assert the rendered DOM, not just the control's error map.
+    const fixture = TestBed.createComponent(LoginComponent);
+    await fixture.whenStable();
+
+    fixture.componentInstance.submit();
+    await fixture.whenStable();
+
+    expect(fixture.nativeElement.textContent).toContain('Email is required');
+    expect(fixture.nativeElement.textContent).toContain('Password is required');
+  });
+
   it('attaches a server validation message to its control', async () => {
     const fixture = TestBed.createComponent(LoginComponent);
     fixture.componentInstance.form.setValue({ email: 'a@b.c', password: 'hunter22' });
