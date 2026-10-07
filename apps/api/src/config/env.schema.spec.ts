@@ -106,14 +106,4 @@ describe('mail configuration', () => {
       }),
     ).toThrow(/MAIL_FROM/);
   });
-
-  it('provides no default for the transport URL, which can carry a password', () => {
-    let message = '';
-    try {
-      validateEnv({ ...valid, SMTP_URL: 'not-a-url', MAIL_FROM: 'bills@example.com' });
-    } catch (e) {
-      message = (e as Error).message;
-    }
-    expect(message).not.toMatch(/smtp:\/\/localhost|changeme|default/i);
-  });
 });

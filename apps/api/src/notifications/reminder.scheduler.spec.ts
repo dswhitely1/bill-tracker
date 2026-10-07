@@ -35,6 +35,9 @@ describe('ReminderScheduler under NODE_ENV=test', () => {
 
 describe('ReminderScheduler in a real environment', () => {
   it('runs once at bootstrap, so a server that was down at 08:00 still delivers', async () => {
+    // The bootstrap run is deliberately not awaited (it must not block the
+    // server from accepting traffic), so it has merely been *started* by
+    // the time `onApplicationBootstrap()` resolves, not completed.
     await build({ NODE_ENV: 'development', APP_TIMEZONE: 'UTC' }).onApplicationBootstrap();
 
     expect(run).toHaveBeenCalledTimes(1);
@@ -59,6 +62,11 @@ describe('ReminderScheduler in a real environment', () => {
     run.mockRejectedValueOnce(new Error('database is not up yet'));
 
     await build({ NODE_ENV: 'development', APP_TIMEZONE: 'UTC' }).onApplicationBootstrap();
+    // The bootstrap run is fire-and-forget, so its rejection is still
+    // settling on the microtask queue when `onApplicationBootstrap()`
+    // resolves. Let it drain before checking that the failure it carries
+    // did not stop cron registration.
+    await Promise.resolve();
 
     // A boot-time hiccup must not leave the process running all day with
     // no reminder job scheduled — a silent failure rather than a loud one.
@@ -68,9 +76,17 @@ describe('ReminderScheduler in a real environment', () => {
   it('does not reject when the bootstrap run throws', async () => {
     run.mockRejectedValueOnce(new Error('database is not up yet'));
 
+    // The bootstrap run is not awaited by `onApplicationBootstrap`, so the
+    // hook settling cleanly proves only that *starting* the run didn't
+    // throw synchronously. The real claim — that the run's own rejection
+    // never escapes as an unhandled rejection — is `runOnce`'s try/catch,
+    // exercised directly above; this asserts the hook's own promise shape.
     await expect(
       build({ NODE_ENV: 'development', APP_TIMEZONE: 'UTC' }).onApplicationBootstrap(),
     ).resolves.toBeUndefined();
+    // Drain the microtask queue so the rejected `run()` mock settles
+    // within this test rather than leaking into the next one.
+    await Promise.resolve();
   });
 
   it('fires at 08:00, after the horizon roll rather than before it', async () => {

@@ -81,6 +81,9 @@ describe('NotificationsComponent', () => {
 
     expect(text(fixture)).toContain('Due tomorrow');
     expect(text(fixture)).toContain('Rent');
+    // dueDate is '2026-10-08'; CalendarDatePipe's default ('medium') format
+    // renders `${MONTH_NAMES_SHORT[month - 1]} ${day}, ${year}`.
+    expect(text(fixture)).toContain('Oct 8, 2026');
     expect(text(fixture)).toContain('$1,200.00');
   });
 
@@ -178,7 +181,10 @@ describe('NotificationsComponent', () => {
   });
 
   it('explains that reminders are off rather than claiming there are none', async () => {
-    user.set(profile({ notifyInApp: false }));
+    // notifyEmail is explicit here so this case is genuinely distinguished
+    // from the both-off case below, rather than both landing on whatever
+    // the fixture default happens to be.
+    user.set(profile({ notifyInApp: false, notifyEmail: true }));
     const fixture = TestBed.createComponent(NotificationsComponent);
     fixture.detectChanges();
     await TestBed.inject(ApplicationRef).whenStable();
@@ -187,9 +193,42 @@ describe('NotificationsComponent', () => {
     // "No reminders" would be false and is exactly the wrong thing to
     // tell someone about their bills.
     expect(text(fixture)).toContain('turned off');
+    expect(text(fixture)).toContain('still');
     expect(text(fixture)).not.toContain('No reminders yet');
     expect(
       fixture.nativeElement.querySelector('[data-testid="to-settings"]'),
     ).not.toBeNull();
+  });
+
+  it('says no reminders are being recorded when both channels are off, rather than promising history that will not reappear', async () => {
+    user.set(profile({ notifyInApp: false, notifyEmail: false }));
+    const fixture = TestBed.createComponent(NotificationsComponent);
+    fixture.detectChanges();
+    await TestBed.inject(ApplicationRef).whenStable();
+    fixture.detectChanges();
+
+    // With email also off, nothing is being recorded server-side (spec
+    // §4.3's join produces no rows), so "still being recorded" would be
+    // false. The page must say so plainly and point at /settings.
+    expect(text(fixture)).toContain('no reminders are being recorded');
+    expect(text(fixture)).not.toContain('Reminders are still');
+    expect(text(fixture)).not.toContain('reveal them');
+    expect(
+      fixture.nativeElement.querySelector('[data-testid="to-settings"]'),
+    ).not.toBeNull();
+  });
+
+  it('does not say "No reminders yet" when the list failed to load', async () => {
+    const fixture = TestBed.createComponent(NotificationsComponent);
+    fixture.detectChanges();
+    http.expectOne('/api/notifications').flush(
+      { message: 'Internal server error' },
+      { status: 500, statusText: 'Internal Server Error' },
+    );
+    await TestBed.inject(ApplicationRef).whenStable();
+    fixture.detectChanges();
+
+    expect(fixture.nativeElement.querySelector('.error')?.textContent).toBeTruthy();
+    expect(text(fixture)).not.toContain('No reminders yet');
   });
 });

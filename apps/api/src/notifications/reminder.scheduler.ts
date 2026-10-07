@@ -44,7 +44,17 @@ export class ReminderScheduler implements OnApplicationBootstrap {
     // unmaterialized horizon means the application is serving wrong data.
     // Here a boot-time hiccup must not leave the process up all day with
     // no reminder job scheduled, which fails silently instead of loudly.
-    await this.runOnce('Bootstrap');
+    //
+    // Deliberately not awaited: `onApplicationBootstrap` runs inside
+    // `app.init()`, which `listen()` calls before binding the port, so
+    // awaiting here would put every per-user SMTP send on the critical
+    // path to accepting traffic. Mail is third-party network I/O — a
+    // blackholed SMTP host costs nodemailer's full connection timeout per
+    // send, sequentially, for however many users are mailed — and must
+    // never sit between process start and the server accepting requests.
+    // `runOnce` already catches and logs everything, so there is no
+    // unhandled rejection from letting it run in the background.
+    void this.runOnce('Bootstrap');
 
     const timeZone = this.config.get('APP_TIMEZONE', { infer: true });
     const job = new CronJob(

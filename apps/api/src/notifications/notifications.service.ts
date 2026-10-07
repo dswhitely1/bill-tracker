@@ -23,9 +23,11 @@ export const LIST_CAP = 200;
  * §3.2). Rename a bill and its old reminders say the new name, which is
  * what keeps the bell from contradicting the dashboard.
  *
- * `due_date` and `created_at` are cast to text because a raw query skips
- * TypeORM's entity hydration, and node-postgres would otherwise parse the
- * `date` into a JS `Date` in the host's zone.
+ * `due_date` is cast to text because a raw query skips TypeORM's entity
+ * hydration, and node-postgres would otherwise parse the `date` into a JS
+ * `Date` in the host's zone. `created_at` is deliberately left as a native
+ * `timestamptz` — do not add `::text` to it — because `toItem()` below
+ * calls `.toISOString()` on it, which only exists on a `Date`.
  *
  * The `LIMIT` takes one more row than the cap, so the service can tell
  * "exactly at the cap" from "truncated" without a second COUNT.

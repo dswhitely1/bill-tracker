@@ -31,7 +31,7 @@ interface Row {
   template: `
     <header class="page-header">
       <h1>Reminders</h1>
-      @if (store.unreadCount() > 0) {
+      @if (notificationsEnabled() && store.unreadCount() > 0) {
         <button
           matButton
           data-testid="mark-all-read"
@@ -52,11 +52,18 @@ interface Row {
 
     @if (!notificationsEnabled()) {
       <p class="muted">
-        In-app reminders are turned off, so nothing is shown here. Reminders are still
-        being recorded, and turning them back on will reveal them.
+        @if (notifyEmail()) {
+          In-app reminders are turned off, so nothing is shown here. Reminders are still
+          being recorded, and turning them back on will reveal them.
+        } @else {
+          In-app reminders are turned off and email reminders are off too, so no
+          reminders are being recorded right now. Turning in-app back on in settings
+          will show reminders from that point forward, not any history from while
+          both were off.
+        }
       </p>
       <a matButton routerLink="/settings" data-testid="to-settings">Open settings</a>
-    } @else if (rows().length === 0 && !store.loading()) {
+    } @else if (rows().length === 0 && !store.loading() && store.error() === null) {
       <p class="muted">No reminders yet. They arrive three days and one day before a bill is due.</p>
     } @else {
       <mat-list>
@@ -125,6 +132,16 @@ export class NotificationsComponent {
   protected readonly notificationsEnabled = computed(
     () => this.session.user()?.notifyInApp ?? true,
   );
+
+  /**
+   * Which explanation the toggles-off branch owes the user. With email
+   * still on, reminders keep being recorded server-side (spec §4.3 joins
+   * on `notify_in_app OR notify_email`) and reappear once in-app is
+   * switched back on. With both off, the join produces no rows at all —
+   * nothing is recorded — so promising that history will reappear would
+   * be false; the only honest promise is reminders from that point on.
+   */
+  protected readonly notifyEmail = computed(() => this.session.user()?.notifyEmail ?? true);
 
   protected readonly rows = computed<Row[]>(() =>
     this.store.items().map((item) => ({
