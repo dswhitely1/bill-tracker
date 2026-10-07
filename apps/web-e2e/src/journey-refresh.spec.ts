@@ -3,15 +3,37 @@ import { newAccount } from './support/accounts';
 import { registerAndSignIn } from './support/flows';
 
 test('several requests failing at once produce exactly one refresh', async ({ page }) => {
+  // Regression (fix round 2): clicking an in-app "Bills" link used to be
+  // this test's stampede, back when the Bills screen was the only one
+  // that loaded BillsStore. Now Upcoming loads BillsStore too (for its
+  // bill filter), so by the time a test clicked into Bills, BillsStore
+  // was already warm from landing on Upcoming first — leaving only
+  // CategoriesStore's one request to 401, and `toBe(1)` passing with a
+  // single caller, proving nothing about single-flighting. Verified by
+  // temporarily removing SessionService.refresh()'s in-flight cache: the
+  // old shape of this test still passed.
+  //
+  // The genuine stampede is the *first* arrival at /upcoming, where
+  // BillsStore and InstancesStore both load concurrently, both cold.
+  // Getting two requests to land together means the counter and the
+  // interception have to be in place before that landing happens, so
+  // registration is driven inline here rather than through
+  // registerAndSignIn.
   const account = newAccount();
-  await registerAndSignIn(page, account);
+
+  // A hard load, deliberately before the counter or the route
+  // interception exist: the boot-time APP_INITIALIZER (`restore()`)
+  // refresh against an absent cookie is real, but it is not the stampede
+  // under test, and counting it would misrepresent what single-flighting
+  // guards.
+  await page.goto('/register');
 
   // Reject the next response from each of these endpoints with a 401,
   // exactly as an expired access token would. Doing it this way rather
   // than by shortening JWT_ACCESS_TTL keeps the test deterministic and
   // keeps a timing knob out of the API's configuration.
   const alreadyRejected = new Set<string>();
-  await page.route(/\/api\/(bills|categories|bill-instances)/, async (route) => {
+  await page.route(/\/api\/(bills|bill-instances)/, async (route) => {
     const key = new URL(route.request().url()).pathname;
     if (alreadyRejected.has(key)) {
       await route.continue();
@@ -33,24 +55,20 @@ test('several requests failing at once produce exactly one refresh', async ({ pa
   };
   page.on('request', countRefreshes);
 
-  // A screen that loads several resources at once, so several 401s land
-  // together and the single-flight path is the one under test.
-  //
-  // Navigating with an in-app link rather than `page.goto` on purpose:
-  // `page.goto` is a hard browser reload, which re-runs the
-  // `APP_INITIALIZER` (`SessionService.restore()`) and issues its own
-  // refresh — a real, separate round trip, since the access token is
-  // deliberately kept in memory only and never survives a reload. That
-  // refresh has nothing to do with the stampede this test is about, and
-  // counting it here would misrepresent what the single-flight cache
-  // actually guards. Clicking the shell's "Bills" nav link instead stays
-  // on the already-booted SPA, matching the realistic case: a
-  // signed-in user clicking around after their access token has expired.
-  await page.getByRole('link', { name: 'Bills' }).click();
-  // Exact match: the empty-state's "No bills yet" heading otherwise
-  // satisfies a case-insensitive substring match on "Bills" too.
-  await expect(page.getByRole('heading', { name: 'Bills', exact: true })).toBeVisible();
-  await expect(page.getByText('No bills yet')).toBeVisible();
+  // Submitting registration signs the visitor in and navigates to
+  // /upcoming via the Angular Router — client-side, not a hard reload —
+  // so this is not a second boot-time refresh. It is where
+  // UpcomingComponent's constructor fires BillsStore.load() and
+  // InstancesStore's load() together, both cold, both intercepted above.
+  await page.getByLabel('Email').fill(account.email);
+  await page.getByLabel('Name').fill(account.name);
+  await page.getByLabel('Password').fill(account.password);
+  await page.getByRole('button', { name: 'Create account' }).click();
+
+  await expect(page).toHaveURL(/\/upcoming/);
+  // Exact match: the sidenav's "Upcoming" nav link is a link, not a
+  // heading, but exactness costs nothing and keeps this honest.
+  await expect(page.getByRole('heading', { name: 'Upcoming', exact: true })).toBeVisible();
 
   page.off('request', countRefreshes);
 
