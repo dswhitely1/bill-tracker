@@ -8,6 +8,7 @@ import { AuthApi } from './auth.api';
 import { BillInstancesApi } from './bill-instances.api';
 import { BillsApi } from './bills.api';
 import { CategoriesApi } from './categories.api';
+import { NotificationsApi } from './notifications.api';
 import { UsersApi } from './users.api';
 
 let http: HttpTestingController;
@@ -221,5 +222,28 @@ describe('BillInstancesApi', () => {
     const req = http.expectOne('/api/bill-instances/inst-1/payments');
     expect(req.request.method).toBe('GET');
     req.flush([]);
+  });
+});
+
+describe('NotificationsApi', () => {
+  it('lists at the plain notifications path', () => {
+    TestBed.inject(NotificationsApi).list().subscribe();
+    const req = http.expectOne('/api/notifications');
+    expect(req.request.method).toBe('GET');
+    req.flush({ items: [], unreadCount: 0, truncated: false });
+  });
+
+  it('marks one notification read at its nested path', () => {
+    TestBed.inject(NotificationsApi).markRead('note-1').subscribe();
+    const req = http.expectOne('/api/notifications/note-1/read');
+    expect(req.request.method).toBe('POST');
+    req.flush(null);
+  });
+
+  it('marks every notification read at the read-all path', () => {
+    TestBed.inject(NotificationsApi).markAllRead().subscribe();
+    const req = http.expectOne('/api/notifications/read-all');
+    expect(req.request.method).toBe('POST');
+    req.flush({ updated: 0 });
   });
 });
