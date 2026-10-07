@@ -17,6 +17,11 @@ test('a reminder leads to its bill and clears once read', async ({ page }) => {
 
   const dueDate = daysFromToday(1);
   await createBill(page, { name: 'Electric', amount: '84.50', startDate: dueDate });
+  // A second bill on the same day. Without it this journey cannot tell a
+  // list filtered to the reminded bill from a list that happens to hold
+  // only one row — which is why dropping billId from the link changed
+  // nothing when this journey was first written.
+  await createBill(page, { name: 'Water', amount: '31.00', startDate: dueDate });
 
   // The one step the UI cannot perform: the cron runs at 08:00.
   await seedNotification(account.email, 'DUE_TOMORROW', 'Electric');
@@ -39,6 +44,13 @@ test('a reminder leads to its bill and clears once read', async ({ page }) => {
   await expect(page).toHaveURL(/\/upcoming\?/);
   await expect(page).toHaveURL(new RegExp(`from=${dueDate}`));
   await expect(page.getByText('Electric').first()).toBeVisible();
+  // The filter actually filtered: Water is due the same day and would be
+  // in an unfiltered list for this range. Scoped to the rows accordion,
+  // not the whole page — the "Bill" filter select also has a "Water"
+  // option, and the bell's own menu overlay (a separate CDK layer) could
+  // in principle still be attached; neither is the thing being asserted
+  // on here.
+  await expect(page.locator('mat-accordion').getByText('Water')).toHaveCount(0);
 
   // Clicking the reminder acknowledged it, so the badge is gone.
   await expect(bell).toHaveAttribute('aria-label', 'Reminders, none unread');
