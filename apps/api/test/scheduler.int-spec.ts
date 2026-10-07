@@ -63,4 +63,12 @@ describe('scheduling under NODE_ENV=test', () => {
     await generator.materializeAll();
     expect((await instancesOf(bill)).length).toBe(first);
   });
+
+  it('provides the reminder scheduler even though it schedules nothing here', async () => {
+    // If NotificationsModule were simply missing from AppModule, the
+    // registry would also be empty — and the test above would pass for
+    // the wrong reason.
+    const { ReminderScheduler } = await import('../src/notifications/reminder.scheduler.js');
+    expect(moduleRef.get(ReminderScheduler)).toBeInstanceOf(ReminderScheduler);
+  });
 });

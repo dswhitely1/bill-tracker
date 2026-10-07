@@ -38,6 +38,13 @@ export const routes: Routes = [
           import('./calendar/calendar.component').then((m) => m.CalendarComponent),
       },
       {
+        path: 'notifications',
+        loadComponent: () =>
+          import('./notifications/notifications.component').then(
+            (m) => m.NotificationsComponent,
+          ),
+      },
+      {
         path: 'upcoming',
         loadComponent: () =>
           import('./instances/upcoming.component').then((m) => m.UpcomingComponent),

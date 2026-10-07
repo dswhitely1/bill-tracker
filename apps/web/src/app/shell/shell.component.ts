@@ -6,6 +6,7 @@ import { MatListModule } from '@angular/material/list';
 import { MatSidenavModule } from '@angular/material/sidenav';
 import { MatToolbarModule } from '@angular/material/toolbar';
 import { SessionService } from '../core/auth/session.service';
+import { NotificationBellComponent } from './notification-bell.component';
 
 @Component({
   selector: 'app-shell',
@@ -18,12 +19,14 @@ import { SessionService } from '../core/auth/session.service';
     MatListModule,
     MatSidenavModule,
     MatToolbarModule,
+    NotificationBellComponent,
   ],
   template: `
     <mat-toolbar>
       <span class="brand">Bill Tracker</span>
       <span class="spacer"></span>
       <span class="user">{{ user()?.name }}</span>
+      <app-notification-bell />
       <button matIconButton data-testid="sign-out" aria-label="Sign out" (click)="signOut()">
         <mat-icon>logout</mat-icon>
       </button>

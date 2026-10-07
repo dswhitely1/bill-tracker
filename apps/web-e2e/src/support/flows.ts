@@ -22,6 +22,17 @@ export function startOfThisMonth(): string {
   return `${new Date().toISOString().slice(0, 7)}-01`;
 }
 
+/**
+ * A calendar day `n` days from today, in the browser's zone. Good enough
+ * for a journey: the API's APP_TIMEZONE is UTC under e2e, and the suite
+ * does not run across a midnight boundary.
+ */
+export function daysFromToday(n: number): string {
+  const date = new Date();
+  date.setDate(date.getDate() + n);
+  return date.toISOString().slice(0, 10);
+}
+
 export interface BillInput {
   name: string;
   amount: string;

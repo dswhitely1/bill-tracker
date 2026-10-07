@@ -7,11 +7,13 @@ import { Category } from '../categories/category.entity';
 import { Bill } from '../bills/bill.entity';
 import { BillInstance } from '../bills/bill-instance.entity';
 import { PaymentLog } from '../bills/payment-log.entity';
+import { Notification } from '../notifications/notification.entity';
 import { InitialSchema1759536000000 } from './migrations/1759536000000-InitialSchema';
 import { AddBillTables1759622400000 } from './migrations/1759622400000-AddBillTables';
 import {
   AddPaymentLogsSignCheck1759708800000,
 } from './migrations/1759708800000-AddPaymentLogsSignCheck';
+import { AddNotifications1759795200000 } from './migrations/1759795200000-AddNotifications';
 
 loadEnv({ path: process.env.ENV_FILE ?? '.env', quiet: true });
 
@@ -33,9 +35,10 @@ export const AppDataSource = new DataSource({
   ssl: process.env.DB_SSL === 'true' ? { rejectUnauthorized: true } : false,
   synchronize: false,
   logging: false,
-  entities: [User, RefreshToken, Category, Bill, BillInstance, PaymentLog],
+  entities: [User, RefreshToken, Category, Bill, BillInstance, PaymentLog, Notification],
   migrations: [
     InitialSchema1759536000000, AddBillTables1759622400000, AddPaymentLogsSignCheck1759708800000,
+    AddNotifications1759795200000,
   ],
   // Without this, a connection checkout the pool can't satisfy hangs
   // forever with no log and no error. Pool sizing (`max`) is left at its

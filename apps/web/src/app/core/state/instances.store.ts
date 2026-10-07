@@ -80,6 +80,17 @@ export class InstancesStore {
    */
   readonly fetchedOn = this.fetchedOnState.asReadonly();
 
+  /**
+   * Last-seen counter value. The effect compares against this instead of
+   * relying on an effect's first flush running its body regardless of its
+   * dependencies — which is what made the old refetch test tautological:
+   * when the first flush landed after a range had already loaded, the
+   * body ran with `loaded` already true and fetched for no reason at all.
+   *
+   * Initialized from the current value so the first flush is a no-op.
+   */
+  private lastBillsMutations = this.bills.mutations();
+
   constructor() {
     effect(() => {
       if (!this.session.isAuthenticated()) this.reset();
@@ -88,14 +99,11 @@ export class InstancesStore {
     // A template change rewrites, generates, or cascades on the server by
     // rules this store cannot reproduce. Watching the counter rather than
     // having `BillsStore` call in keeps the dependency pointing one way.
-    //
-    // `loaded` is read untracked on purpose. Tracked, this effect would
-    // also depend on it, so the first successful fetch — which sets it
-    // true — would re-run the effect and immediately fetch the same range
-    // again. The counter is the only thing this effect reacts to.
     effect(() => {
-      this.bills.mutations();
-      if (untracked(() => this.loaded())) void this.refresh();
+      const bills = this.bills.mutations();
+      const moved = bills !== this.lastBillsMutations;
+      this.lastBillsMutations = bills;
+      if (moved && untracked(() => this.loaded())) void this.refresh();
     });
   }
 
