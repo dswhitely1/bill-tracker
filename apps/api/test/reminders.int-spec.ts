@@ -4,6 +4,7 @@ import type { DataSource } from 'typeorm';
 import { AppModule } from '../src/app/app.module';
 import { BillGeneratorService } from '../src/bills/bill-generator.service';
 import { RemindersService } from '../src/notifications/reminders.service';
+import { MailTransport, type MailMessage } from '../src/notifications/mail/mail-transport';
 import { addDays } from '../src/bills/dates';
 import { getTestDataSource, truncateAll } from './db';
 
@@ -12,9 +13,23 @@ let reminders: RemindersService;
 let generator: BillGeneratorService;
 let ds: DataSource;
 
+const sent: MailMessage[] = [];
+let failNextSends = false;
+
+class CapturingMailTransport extends MailTransport {
+  send(message: MailMessage): Promise<void> {
+    if (failNextSends) return Promise.reject(new Error('smtp is down'));
+    sent.push(message);
+    return Promise.resolve();
+  }
+}
+
 beforeAll(async () => {
   process.env.ENV_FILE = '.env.test';
-  moduleRef = await Test.createTestingModule({ imports: [AppModule] }).compile();
+  moduleRef = await Test.createTestingModule({ imports: [AppModule] })
+    .overrideProvider(MailTransport)
+    .useClass(CapturingMailTransport)
+    .compile();
   await moduleRef.init();
   reminders = moduleRef.get(RemindersService);
   generator = moduleRef.get(BillGeneratorService);
@@ -23,6 +38,8 @@ beforeAll(async () => {
 
 beforeEach(async () => {
   await truncateAll(ds);
+  sent.length = 0;
+  failNextSends = false;
 });
 
 afterAll(async () => {
@@ -236,5 +253,138 @@ describe('RemindersService.scan', () => {
     await reminders.scan();
 
     expect(await kindsFor(userId)).toEqual(['DUE_IN_3_DAYS', 'DUE_TOMORROW']);
+  });
+});
+
+describe('RemindersService.run', () => {
+  it('sends one digest to one user covering every new reminder', async () => {
+    const userId = await seedUser({ email: 'don@example.com' });
+    const asOf = generator.today();
+    await seedInstance(userId, { dueDate: addDays(asOf, 3), name: 'Rent', amount: 1200 });
+    await seedInstance(userId, { dueDate: addDays(asOf, 1), name: 'Electric', amount: 84.5 });
+
+    const result = await reminders.run();
+
+    // Eight bills would still be one email; two certainly are.
+    expect(sent).toHaveLength(1);
+    expect(sent[0].to).toBe('don@example.com');
+    expect(sent[0].subject).toBe('2 bills due soon');
+    expect(sent[0].text).toContain('Rent');
+    expect(sent[0].text).toContain('Electric');
+    expect(result).toEqual({ created: 2, usersNotified: 1, mailSent: 1, mailFailed: 0 });
+  });
+
+  it('gives each user only their own bills', async () => {
+    const mine = await seedUser({ email: 'mine@example.com' });
+    const theirs = await seedUser({ email: 'theirs@example.com' });
+    const due = addDays(generator.today(), 1);
+    await seedInstance(mine, { dueDate: due, name: 'My Rent' });
+    await seedInstance(theirs, { dueDate: due, name: 'Their Rent' });
+
+    await reminders.run();
+
+    expect(sent).toHaveLength(2);
+    const mineMail = sent.find((m) => m.to === 'mine@example.com');
+    const theirsMail = sent.find((m) => m.to === 'theirs@example.com');
+    expect(mineMail?.text).toContain('My Rent');
+    expect(mineMail?.text).not.toContain('Their Rent');
+    expect(theirsMail?.text).toContain('Their Rent');
+    expect(theirsMail?.text).not.toContain('My Rent');
+  });
+
+  it('records the reminder but sends no mail when email is switched off', async () => {
+    const userId = await seedUser({ notifyEmail: false, notifyInApp: true });
+    await seedInstance(userId, { dueDate: addDays(generator.today(), 1) });
+
+    const result = await reminders.run();
+
+    expect(await kindsFor(userId)).toEqual(['DUE_TOMORROW']);
+    expect(sent).toHaveLength(0);
+    expect(result.mailSent).toBe(0);
+  });
+
+  it('sends mail to a user who has only the email channel on', async () => {
+    const userId = await seedUser({ notifyEmail: true, notifyInApp: false });
+    await seedInstance(userId, { dueDate: addDays(generator.today(), 1) });
+
+    await reminders.run();
+
+    expect(sent).toHaveLength(1);
+  });
+
+  it('shows the outstanding balance, not the face amount', async () => {
+    const userId = await seedUser();
+    await seedInstance(userId, {
+      dueDate: addDays(generator.today(), 1),
+      status: 'PARTIALLY_PAID',
+      amount: 1200,
+      amountPaid: 1000,
+    });
+
+    await reminders.run();
+
+    expect(sent[0].text).toContain('$200.00');
+    expect(sent[0].text).not.toContain('$1,200.00');
+  });
+
+  it('keeps the reminders when mail fails, and resolves rather than throwing', async () => {
+    const userId = await seedUser();
+    await seedInstance(userId, { dueDate: addDays(generator.today(), 1) });
+    failNextSends = true;
+
+    const result = await reminders.run();
+
+    // Mail failure costs the email and nothing else (spec §4.4). Rolling
+    // back would mean a persistently broken mail server leaves the bell
+    // empty too, losing both channels instead of one.
+    expect(await kindsFor(userId)).toEqual(['DUE_TOMORROW']);
+    expect(result).toEqual({ created: 1, usersNotified: 1, mailSent: 0, mailFailed: 1 });
+  });
+
+  it('does not let one user\'s mail failure stop another user\'s', async () => {
+    const first = await seedUser({ email: 'first@example.com' });
+    const second = await seedUser({ email: 'second@example.com' });
+    const due = addDays(generator.today(), 1);
+    await seedInstance(first, { dueDate: due });
+    await seedInstance(second, { dueDate: due });
+
+    let calls = 0;
+    const transport = moduleRef.get(MailTransport);
+    const original = transport.send.bind(transport);
+    transport.send = (message: MailMessage): Promise<void> => {
+      calls += 1;
+      return calls === 1 ? Promise.reject(new Error('smtp is down')) : original(message);
+    };
+
+    const result = await reminders.run();
+    transport.send = original;
+
+    expect(result.mailSent).toBe(1);
+    expect(result.mailFailed).toBe(1);
+    expect(sent).toHaveLength(1);
+  });
+
+  it('sends nothing at all on a second run', async () => {
+    const userId = await seedUser();
+    await seedInstance(userId, { dueDate: addDays(generator.today(), 1) });
+
+    await reminders.run();
+    sent.length = 0;
+    const second = await reminders.run();
+
+    // This is what makes the bootstrap run safe on every restart: nothing
+    // new, so nobody is mailed twice.
+    expect(sent).toHaveLength(0);
+    expect(second).toEqual({ created: 0, usersNotified: 0, mailSent: 0, mailFailed: 0 });
+  });
+
+  it('does nothing and sends nothing when no bill qualifies', async () => {
+    const userId = await seedUser();
+    await seedInstance(userId, { dueDate: addDays(generator.today(), 5) });
+
+    const result = await reminders.run();
+
+    expect(result).toEqual({ created: 0, usersNotified: 0, mailSent: 0, mailFailed: 0 });
+    expect(sent).toHaveLength(0);
   });
 });
