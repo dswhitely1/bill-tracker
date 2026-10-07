@@ -92,7 +92,7 @@ interface DayCell {
                 [attr.data-date]="cell.date"
                 [attr.tabindex]="cell.date === focused() ? 0 : -1"
                 [attr.aria-label]="cell.label"
-                [attr.aria-pressed]="cell.date === selected()"
+                [attr.aria-selected]="cell.date === selected()"
                 (click)="select(cell.date)"
                 (focus)="focused.set(cell.date)"
               >
@@ -348,6 +348,7 @@ export class CalendarComponent {
     const instances = this.byDay().get(date) ?? [];
     const overdue = instances.filter((i) => i.isOverdue).length;
     const { day, month, year } = parts(date);
+    const isToday = date === this.todayDate;
 
     const description =
       instances.length === 0
@@ -359,7 +360,7 @@ export class CalendarComponent {
       date,
       day,
       inMonth: isSameMonth(date, this.anchor()),
-      isToday: date === this.todayDate,
+      isToday,
       chips: instances.slice(0, MAX_CHIPS).map((instance) => ({
         id: instance.id,
         name: instance.billName,
@@ -367,7 +368,11 @@ export class CalendarComponent {
         paid: instance.status === 'PAID',
       })),
       overflow: Math.max(0, instances.length - MAX_CHIPS),
-      label: `${day} ${MONTH_NAMES_LONG[month - 1]} ${year}, ${description}`,
+      // "today" rides in the label itself, not only the `.today` CSS
+      // outline — the same reasoning as the overdue chip's `!` marker:
+      // colour (or a visual-only outline) is never the only carrier of
+      // state, or a screen-reader user has no way to locate today at all.
+      label: `${day} ${MONTH_NAMES_LONG[month - 1]} ${year}${isToday ? ', today' : ''}, ${description}`,
     };
   }
 }

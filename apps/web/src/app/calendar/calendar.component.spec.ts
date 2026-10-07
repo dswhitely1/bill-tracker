@@ -33,6 +33,12 @@ function instancesRequest() {
 }
 
 /**
+ * Elements `render()` has attached to `document.body` (see below), removed
+ * again in `afterEach` so one test's DOM does not leak into the next.
+ */
+const attachedElements: HTMLElement[] = [];
+
+/**
  * Creates the fixture and answers its constructor-time request.
  *
  * `InstancesStore` carries a mutation-watching effect that reads its own
@@ -46,9 +52,16 @@ function instancesRequest() {
  * `dashboard.component.spec.ts` against this same store). The leading
  * `whenStable()` lets that first, dependency-registering pass run while
  * `loaded()` is still false, before the fetch is answered.
+ *
+ * The fixture's element is attached to `document.body`: `focusAfterRender`
+ * calls real `.focus()` on a grid cell, and a detached element never
+ * becomes `document.activeElement` in JSDOM, which would make every
+ * assertion against it vacuously pass no matter what the component did.
  */
 async function render(rows: BillInstanceResponse[] = [base]) {
   const fixture = TestBed.createComponent(CalendarComponent);
+  document.body.appendChild(fixture.nativeElement);
+  attachedElements.push(fixture.nativeElement);
   await fixture.whenStable();
   instancesRequest().flush(rows);
   await fixture.whenStable();
@@ -84,6 +97,7 @@ beforeEach(() => {
 afterEach(() => {
   vi.restoreAllMocks();
   http.verify();
+  for (const el of attachedElements.splice(0)) el.remove();
 });
 
 describe('CalendarComponent grid', () => {
@@ -141,6 +155,22 @@ describe('CalendarComponent grid', () => {
     expect(cell.closest('[role="gridcell"]').className).toContain('today');
   });
 
+  it('names today in the accessible label, not only the visual outline', async () => {
+    // The same reasoning as the overdue chip's `!` marker: a visual-only
+    // cue (here, the `.today` CSS outline) leaves a screen-reader user with
+    // no way to locate today at all.
+    const fixture = await render();
+    const todayLabel = fixture.nativeElement
+      .querySelector('[data-date="2026-10-09"]')
+      .getAttribute('aria-label');
+    const otherLabel = fixture.nativeElement
+      .querySelector('[data-date="2026-10-10"]')
+      .getAttribute('aria-label');
+
+    expect(todayLabel).toContain('today');
+    expect(otherLabel).not.toContain('today');
+  });
+
   it('describes each day for assistive technology, including what is on it', async () => {
     const fixture = await render([
       { ...base, id: 'a', dueDate: '2026-10-09' },
@@ -185,6 +215,19 @@ describe('CalendarComponent grid', () => {
 
     expect(cell.querySelectorAll('.chip')).toHaveLength(3);
     expect(cell.textContent).toContain('+2 more');
+  });
+
+  it('marks the selected cell with aria-selected, not aria-pressed', async () => {
+    // `aria-pressed` signals toggle-button state; `aria-selected` is the
+    // conventional attribute for selection within a grid.
+    const fixture = await render();
+    const cell = fixture.nativeElement.querySelector('[data-date="2026-10-09"]');
+    expect(cell.getAttribute('aria-selected')).toBe('false');
+    expect(cell.hasAttribute('aria-pressed')).toBe(false);
+
+    fixture.componentInstance.select('2026-10-09');
+    await fixture.whenStable();
+    expect(cell.getAttribute('aria-selected')).toBe('true');
   });
 });
 
@@ -289,7 +332,7 @@ describe('CalendarComponent keyboard navigation', () => {
     expect(fixture.nativeElement.textContent).toContain('November 2026');
   });
 
-  it('follows an arrow across a month boundary and refetches', async () => {
+  it('follows an arrow across a month boundary without refetching, since the spill day is already loaded', async () => {
     const fixture = await render();
     fixture.componentInstance.focus('2026-10-31');
     await fixture.whenStable();
@@ -297,6 +340,35 @@ describe('CalendarComponent keyboard navigation', () => {
     await fixture.whenStable();
 
     // 2026-11-01 is inside the rendered grid, so no refetch is needed.
+    // `http.verify()` in `afterEach` would fail if one were issued anyway.
     expect(fixture.componentInstance.focused()).toBe('2026-11-01');
+  });
+
+  // `focused()` is a signal; the roving `tabindex` is bound to that same
+  // signal, so every test above is blind to whether DOM focus actually
+  // moved — `focusAfterRender` could be deleted, mis-selectored, or
+  // silently no-op on its optional chain, and the signal-only assertions
+  // would not notice. These read `document.activeElement` instead.
+  describe('real DOM focus, not just the signal', () => {
+    it('moves focus to the cell within the already-rendered month', async () => {
+      const fixture = await render();
+      press(fixture, 'ArrowRight');
+      await fixture.whenStable();
+
+      expect(document.activeElement?.getAttribute('data-date')).toBe('2026-10-10');
+    });
+
+    it('moves focus to the newly focused cell after a month change re-renders the grid', async () => {
+      // `afterNextRender` exists for exactly this case: at the moment
+      // `PageDown` is handled, the target cell is not in the DOM yet — the
+      // whole grid is re-rendered for the new month first.
+      const fixture = await render();
+      press(fixture, 'PageDown');
+      instancesRequest().flush([]);
+      await fixture.whenStable();
+      await fixture.whenStable();
+
+      expect(document.activeElement?.getAttribute('data-date')).toBe('2026-11-09');
+    });
   });
 });
