@@ -75,11 +75,12 @@ describe('SummaryStore', () => {
     await first;
 
     await store.load();
-    // The observable consequence of not fetching: a fetch cycle always
-    // flips `loading` true before awaiting the response, so if the second
-    // `load()` had actually issued a request, this would read true (and
-    // the request would still be stuck unflushed below).
-    expect(store.loading()).toBe(false);
+    // The observable consequence of not fetching: the data is still
+    // exactly the first response, not a second answer the store never
+    // asked for. `http.expectNone` below is what actually enforces no
+    // request went out; this is here to satisfy `vitest/expect-expect`
+    // with a real assertion rather than a filler one.
+    expect(store.summary()).toEqual(payload);
     http.expectNone((r) => r.url === '/api/summary');
 
     const forced = store.load(true);
@@ -107,7 +108,17 @@ describe('SummaryStore', () => {
     summaryRequest().flush(payload);
     await loading;
 
-    // Creating a bill generates instances, which moves every card.
+    // An Angular effect runs its body once on its own first flush,
+    // regardless of what it depends on. Without this drain, the
+    // `TestBed.tick()` below would BE that first run — `loadedState` is
+    // already true by then, so `fetch()` would fire unconditionally and
+    // the test would pass even if the effect never read the counter.
+    TestBed.tick();
+    await vi.waitFor(() => expect(store.summary()).toEqual(payload));
+    http.match((r) => r.url === '/api/summary').forEach((r) => r.flush(payload));
+
+    // Creating a bill generates instances, which moves every card. Any
+    // request from here on can only be explained by this announcement.
     TestBed.inject(BillsStore).announceMutation();
     TestBed.tick();
     summaryRequest().flush(secondPayload);
@@ -124,6 +135,12 @@ describe('SummaryStore', () => {
     const loading = store.load();
     summaryRequest().flush(payload);
     await loading;
+
+    // Drain the effect's first execution — see the bill-mutation test
+    // above for why this is required, not cosmetic.
+    TestBed.tick();
+    await vi.waitFor(() => expect(store.summary()).toEqual(payload));
+    http.match((r) => r.url === '/api/summary').forEach((r) => r.flush(payload));
 
     // A dashboard that still shows the pre-payment overdue total after the
     // user pays is worse than no dashboard: it looks authoritative.
@@ -151,6 +168,15 @@ describe('SummaryStore', () => {
     const loading = store.load();
     summaryRequest().flush(payload);
     await loading;
+
+    // Drain the effect's first execution, so the reset below depends on
+    // `session.clear()` actually running the session effect, rather than
+    // on this effect having been declared before the mutation-watching
+    // one and so happening to zero `loadedState` during their shared
+    // first flush.
+    TestBed.tick();
+    await vi.waitFor(() => expect(store.summary()).toEqual(payload));
+    http.match((r) => r.url === '/api/summary').forEach((r) => r.flush(payload));
 
     TestBed.inject(SessionService).clear();
     TestBed.tick();
