@@ -192,15 +192,40 @@ describe('overdue comes from the server', () => {
 });
 
 describe('the range controls', () => {
-  it('falls back to the current range when an invalid one is submitted, keeping existing rows', async () => {
-    // The filters are URL params now (Task 7): an invalid range submitted
-    // through the picker is sanitised by `parseUpcomingParams` rather than
-    // surfaced as a form error — see "renders the default view for a
-    // malformed URL instead of erroring" below, which is the same
-    // behaviour reached by typing the bad range into the address bar
-    // directly. The range it falls back to is the same current month the
-    // screen already loaded, so no second request is sent and the rows
-    // already on screen are undisturbed.
+  it('refuses an over-wide range with a message and sends nothing, leaving the form and URL untouched', async () => {
+    // Coordinator Finding 1: a *submitted* over-wide range must show a
+    // message, unlike a malformed *URL* (covered by "renders the default
+    // view for a malformed URL instead of erroring" below), which silently
+    // falls back because there is no submission to explain. `applyRange()`
+    // now rejects before ever calling `patch()`, so nothing navigates.
+    const fixture = await createFixture();
+    instancesRequest().flush([base]);
+    await fixture.whenStable();
+    await fixture.whenStable();
+
+    const urlBefore = TestBed.inject(Router).url;
+
+    fixture.componentInstance.rangeForm.setValue({ from: '2026-01-01', to: '2027-06-01' });
+    fixture.componentInstance.applyRange();
+    await fixture.whenStable();
+    await fixture.whenStable();
+
+    expect(http.match((r) => r.url === '/api/bill-instances')).toHaveLength(0);
+    expect(fixture.nativeElement.textContent).toContain('400');
+    expect(fixture.nativeElement.textContent).toContain('Rent');
+
+    // Finding 2: nothing navigated, so there is nothing for `rangeForm` or
+    // the URL to have desynced from — the address bar is exactly what it
+    // was, and the form still shows what was typed rather than a silently
+    // substituted default.
+    expect(TestBed.inject(Router).url).toBe(urlBefore);
+    expect(fixture.componentInstance.rangeForm.getRawValue()).toEqual({
+      from: '2026-01-01',
+      to: '2027-06-01',
+    });
+  });
+
+  it('clears the range-form message once a valid range is submitted', async () => {
     const fixture = await createFixture();
     instancesRequest().flush([base]);
     await fixture.whenStable();
@@ -209,10 +234,15 @@ describe('the range controls', () => {
     fixture.componentInstance.rangeForm.setValue({ from: '2026-01-01', to: '2027-06-01' });
     fixture.componentInstance.applyRange();
     await fixture.whenStable();
-    await fixture.whenStable();
+    expect(fixture.componentInstance.rangeFormError()).not.toBeNull();
 
-    expect(http.match((r) => r.url === '/api/bill-instances')).toHaveLength(0);
-    expect(fixture.nativeElement.textContent).toContain('Rent');
+    fixture.componentInstance.rangeForm.setValue({ from: '2026-11-01', to: '2026-11-30' });
+    fixture.componentInstance.applyRange();
+    await fixture.whenStable();
+    expect(fixture.componentInstance.rangeFormError()).toBeNull();
+
+    instancesRequest().flush([]);
+    await fixture.whenStable();
   });
 
   it('applies a valid range', async () => {
@@ -257,15 +287,34 @@ describe('the bill filter', () => {
   });
 
   it('omits billId when "Any bill" is selected', async () => {
+    // Coordinator Finding 4: this used to only set `billId` back to its
+    // already-default `null` and assert no request was sent — a change
+    // that is a no-op under the new architecture regardless of whether
+    // the component omits `billId` correctly, since nothing would refetch
+    // either way. Restored: choose a real bill first, confirm it's on the
+    // request, *then* clear it and confirm the next request omits it.
+    const billId = '44444444-4444-4444-4444-444444444444';
     const fixture = await createFixture();
     instancesRequest().flush([]);
     await fixture.whenStable();
     await fixture.whenStable();
 
-    fixture.componentInstance.setBillId(null);
+    fixture.componentInstance.setBillId(billId);
+    await fixture.whenStable();
+    await fixture.whenStable();
+    const withBill = instancesRequest();
+    expect(withBill.request.params.get('billId')).toBe(billId);
+    withBill.flush([]);
+    await fixture.whenStable();
     await fixture.whenStable();
 
-    expect(http.match((r) => r.url === '/api/bill-instances')).toHaveLength(0);
+    fixture.componentInstance.setBillId(null);
+    await fixture.whenStable();
+    await fixture.whenStable();
+    const withoutBill = instancesRequest();
+    expect(withoutBill.request.params.has('billId')).toBe(false);
+    withoutBill.flush([]);
+    await fixture.whenStable();
   });
 });
 
@@ -490,6 +539,16 @@ describe('UpcomingComponent URL state', () => {
     expect(fixture.componentInstance.params().status).toBeNull();
     expect(fixture.componentInstance.params().overdue).toBeNull();
     expect(fixture.componentInstance.params().sort).toBe('dueDate');
+
+    // Finding 2: `rangeForm` must track the sanitised fallback, not the
+    // garbage that arrived in the URL — `from`/`to` are always part of
+    // `serverQueryKey`, so any change to them necessarily passes the
+    // subscription's `distinctUntilChanged` and resyncs the form. Proven
+    // directly rather than assumed.
+    expect(fixture.componentInstance.rangeForm.getRawValue().from).toBe(
+      fixture.componentInstance.params().from,
+    );
+    expect(fixture.componentInstance.rangeForm.getRawValue().from).not.toBe('2026-13-45');
   });
 
   it('writes a filter change back into the URL', async () => {
@@ -601,5 +660,58 @@ describe('UpcomingComponent URL state', () => {
     await fixture.whenStable();
 
     expect(fixture.nativeElement.textContent).not.toContain('older than');
+  });
+
+  it('resyncs the search box when q changes from the URL, not from typing', async () => {
+    // Coordinator Finding 3. Angular reuses this component instance for a
+    // navigation that changes only query params — a dashboard or calendar
+    // link (Tasks 8/10) straight into `/upcoming?q=...` while this screen
+    // is already mounted lands exactly that way. `searchControl` is only
+    // ever initialised once, in the constructor, so without an explicit
+    // resync it would keep showing whatever was there before.
+    const fixture = await createFixture();
+    instancesRequest().flush([]);
+    await fixture.whenStable();
+    await fixture.whenStable();
+
+    expect(fixture.componentInstance.searchControl.value).toBe('');
+
+    // `merge` keeps the already-committed range in place, so this is a
+    // `q`-only change — `serverQueryKey` is unaffected and no second
+    // `/api/bill-instances` request should be sent.
+    await TestBed.inject(Router).navigate([], {
+      queryParams: { q: 'electric' },
+      queryParamsHandling: 'merge',
+    });
+    await fixture.whenStable();
+    await fixture.whenStable();
+
+    expect(fixture.componentInstance.searchControl.value).toBe('electric');
+    http.expectNone((r) => r.url === '/api/bill-instances');
+  });
+
+  it('does not let the committed echo of its own patch clobber newer typing', async () => {
+    // The guard this depends on: `patch()` records `q` into
+    // `lastPatchedQuery` the moment it is called, before the navigation it
+    // starts has committed. When that navigation's `q` comes back around
+    // through the URL, the resync subscription recognises it as its own
+    // and skips `searchControl.setValue`, so it cannot stomp on anything
+    // typed in the meantime.
+    const fixture = await createFixture();
+    instancesRequest().flush([]);
+    await fixture.whenStable();
+    await fixture.whenStable();
+
+    fixture.componentInstance.setSearch('el');
+    // Before that patch's navigation round-trips back through the URL,
+    // the box moves on to something newer — simulating the user typing
+    // further while the debounce/navigation for the earlier value is
+    // still in flight.
+    fixture.componentInstance.searchControl.setValue('elec', { emitEvent: false });
+    await fixture.whenStable();
+    await fixture.whenStable();
+
+    expect(fixture.componentInstance.searchControl.value).toBe('elec');
+    http.expectNone((r) => r.url === '/api/bill-instances');
   });
 });

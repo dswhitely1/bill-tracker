@@ -25,7 +25,7 @@ import { CalendarDate, compare, today } from '../core/date/calendar-date';
 import { CalendarDatePipe } from '../core/date/calendar-date.pipe';
 import { BillsStore } from '../core/state/bills.store';
 import { CategoriesStore } from '../core/state/categories.store';
-import { InstancesStore } from '../core/state/instances.store';
+import { InstancesStore, rangeError } from '../core/state/instances.store';
 import { PaymentsService } from '../core/state/payments.service';
 import { SummaryStore } from '../core/state/summary.store';
 import { ConfirmDialogComponent, ConfirmDialogResult } from '../shared/confirm-dialog.component';
@@ -91,6 +91,10 @@ function serverQueryKey(p: UpcomingParams): string {
 
       <button matButton="filled" type="submit">Apply</button>
     </form>
+
+    @if (rangeFormError(); as message) {
+      <p class="error" role="alert">{{ message }}</p>
+    }
 
     <div class="filters">
       <mat-form-field>
@@ -273,6 +277,40 @@ export class UpcomingComponent {
   readonly actionError = signal<string | null>(null);
 
   /**
+   * Set by `applyRange()` when the submitted range fails `rangeError`, and
+   * cleared the moment a valid one is submitted.
+   *
+   * This is deliberately separate from the URL's own fallback behaviour in
+   * `parseUpcomingParams`. A malformed *URL* — a bookmark, a shared link, a
+   * hand-edited address bar — gets no banner and silently resolves to the
+   * default range, because there is no "submission" to have gone wrong and
+   * a banner would be blaming the person for someone else's stale link. A
+   * malformed *form submission* is different: a person just asked this
+   * screen for a specific range, so silently substituting another one
+   * without saying so would hide exactly the feedback they need. The old
+   * component (sub-project 3) showed this message by routing through
+   * `InstancesStore.setQuery`, which is no longer reachable from here with
+   * an invalid range — `patch()` only ever sends the URL a range that has
+   * already passed this check.
+   */
+  readonly rangeFormError = signal<string | null>(null);
+
+  /**
+   * The last `q` value this component itself wrote — via the user typing
+   * (debounced into a `patch`) or via the resync subscription below.
+   *
+   * Distinguishes a genuinely external change to `q` — a link into
+   * `/upcoming?q=...` from the dashboard or calendar (Tasks 8/10) while
+   * this screen is already mounted, which Angular reuses the component
+   * instance for, since only query parameters changed — from the
+   * committed echo of a patch this component just issued for the user's
+   * own typing. Resyncing on every `q` emission unconditionally would
+   * clobber whatever has been typed into the box *since* that patch was
+   * issued with the now-stale value it carried.
+   */
+  private lastPatchedQuery: string | null = null;
+
+  /**
    * The URL is the single source of truth for every filter. Nothing is
    * mirrored into component state, so there is no second copy to drift.
    * `requireSync` is safe: `ActivatedRoute`'s observables replay their
@@ -370,6 +408,24 @@ export class UpcomingComponent {
       .pipe(debounceTime(200), takeUntilDestroyed(this.destroyRef))
       .subscribe((value) => this.patch({ q: value.trim() }));
 
+    // Resyncs `searchControl` when `q` changes from somewhere other than
+    // the control itself. `q` is deliberately not part of `serverQueryKey`
+    // (it never reaches the API), so it cannot piggyback on the
+    // subscription above and needs its own, ungated by that key. Guarded
+    // against overwriting newer local typing with the committed echo of
+    // this component's own most recent patch — see `lastPatchedQuery`.
+    this.route.queryParamMap
+      .pipe(
+        map((params) => parseUpcomingParams(params).q),
+        distinctUntilChanged(),
+        takeUntilDestroyed(this.destroyRef),
+      )
+      .subscribe((q) => {
+        if (q === this.lastPatchedQuery) return;
+        this.lastPatchedQuery = q;
+        this.searchControl.setValue(q, { emitEvent: false });
+      });
+
     const onFocus = (): void => this.refreshIfDayChanged();
     window.addEventListener('focus', onFocus);
     this.destroyRef.onDestroy(() => window.removeEventListener('focus', onFocus));
@@ -377,6 +433,15 @@ export class UpcomingComponent {
 
   applyRange(): void {
     const { from, to } = this.rangeForm.getRawValue();
+    const invalid = rangeError(from, to);
+    this.rangeFormError.set(invalid);
+    // A rejected range never reaches `patch()`, so it never reaches the
+    // URL. `parseUpcomingParams`'s own fallback exists for a *different*
+    // case — a malformed URL arrived at from outside this form — and must
+    // stay reachable only that way; routing a form rejection through it
+    // too would silently replace what the person asked for instead of
+    // telling them why it didn't happen.
+    if (invalid !== null) return;
     this.patch({ from, to });
   }
 
@@ -507,6 +572,10 @@ export class UpcomingComponent {
    * the person came from.
    */
   private patch(changes: Partial<UpcomingParams>): void {
+    // Recorded here, centrally, rather than only in the debounced search
+    // subscription — so `setSearch()` (the direct, non-debounced path
+    // tests use) gets the same clobber protection as typing does.
+    if ('q' in changes) this.lastPatchedQuery = changes.q ?? '';
     const next = { ...(this.pendingParams ?? this.params()), ...changes };
     this.pendingParams = next;
     void this.router
