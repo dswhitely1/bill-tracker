@@ -1,4 +1,4 @@
-import { ApplicationRef, provideZonelessChangeDetection } from '@angular/core';
+import { ApplicationRef, provideZonelessChangeDetection, signal } from '@angular/core';
 import { TestBed } from '@angular/core/testing';
 import { HttpTestingController, provideHttpClientTesting } from '@angular/common/http/testing';
 import { provideHttpClient } from '@angular/common/http';
@@ -33,13 +33,19 @@ const response = (
 let http: HttpTestingController;
 let store: NotificationsStore;
 
+// A real signal, not a plain function: the store's session-reset effect
+// only re-runs when a dependency it reads actually changes, and a plain
+// function is never a tracked dependency at all.
+const authenticated = signal(true);
+
 beforeEach(() => {
+  authenticated.set(true);
   TestBed.configureTestingModule({
     providers: [
       provideZonelessChangeDetection(),
       provideHttpClient(),
       provideHttpClientTesting(),
-      { provide: SessionService, useValue: { isAuthenticated: () => true } },
+      { provide: SessionService, useValue: { isAuthenticated: authenticated } },
     ],
   });
   http = TestBed.inject(HttpTestingController);
@@ -137,7 +143,14 @@ describe('NotificationsStore.markRead', () => {
   it('does not decrement twice for a row already read', async () => {
     const loading = store.load();
     http.expectOne('/api/notifications').flush(
-      response({ items: [item({ id: 'n1', isRead: true })], unreadCount: 0 }),
+      // Two rows, one already read. Only n2 is counted — and the count
+      // must start above zero, or Math.max(0, …) clamps the missing
+      // guard away and the test cannot tell a guarded decrement from an
+      // unguarded one.
+      response({
+        items: [item({ id: 'n1', isRead: true }), item({ id: 'n2' })],
+        unreadCount: 1,
+      }),
     );
     await loading;
 
@@ -145,15 +158,20 @@ describe('NotificationsStore.markRead', () => {
     http.expectOne('/api/notifications/n1/read').flush(null);
     await marking;
 
-    expect(store.unreadCount()).toBe(0);
+    expect(store.unreadCount()).toBe(1);
   });
 
   it('never drives the count below zero', async () => {
     const loading = store.load();
     http.expectOne('/api/notifications').flush(
       // A resolved-but-unread row is in `items` yet excluded from the
-      // count, so naive decrementing would go negative.
-      response({ items: [item({ id: 'n1', isResolved: true })], unreadCount: 0 }),
+      // count, so naive decrementing would go negative. n2 is the one
+      // row actually being counted, and the count starts above zero for
+      // the same reason as the test above.
+      response({
+        items: [item({ id: 'n1', isResolved: true }), item({ id: 'n2' })],
+        unreadCount: 1,
+      }),
     );
     await loading;
 
@@ -161,7 +179,7 @@ describe('NotificationsStore.markRead', () => {
     http.expectOne('/api/notifications/n1/read').flush(null);
     await marking;
 
-    expect(store.unreadCount()).toBe(0);
+    expect(store.unreadCount()).toBe(1);
   });
 
   it('leaves the row alone when the request fails', async () => {
@@ -194,6 +212,20 @@ describe('NotificationsStore.markAllRead', () => {
     await marking;
 
     expect(store.items().every((i) => i.isRead)).toBe(true);
+    expect(store.unreadCount()).toBe(0);
+  });
+});
+
+describe('NotificationsStore session reset', () => {
+  it('drops everything when the session ends', async () => {
+    const loading = store.load();
+    http.expectOne('/api/notifications').flush(response());
+    await loading;
+
+    authenticated.set(false);
+    await TestBed.inject(ApplicationRef).whenStable();
+
+    expect(store.items()).toHaveLength(0);
     expect(store.unreadCount()).toBe(0);
   });
 });
