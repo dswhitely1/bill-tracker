@@ -149,7 +149,14 @@ export class DashboardComponent {
   protected readonly store = inject(SummaryStore);
 
   constructor() {
-    void this.store.load();
+    // Forced: `SummaryStore.load()` unforced is a no-op once `loaded` is
+    // true, and its only invalidation is the mutation counters — it never
+    // notices the browser's day turning over. `/upcoming` does, and
+    // refetches on window focus (`refreshIfDayChanged`), so a tab left open
+    // overnight would otherwise show this screen's Overdue card one day
+    // stale against that screen's badges. This is one aggregate query over
+    // a personal ledger, so refetching on every mount is the right trade.
+    void this.store.load(true);
   }
 
   protected readonly overdueAmount = computed(() =>

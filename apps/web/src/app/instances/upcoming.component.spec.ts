@@ -244,6 +244,31 @@ describe('the range controls', () => {
     await fixture.whenStable();
   });
 
+  it('clears the range-form message when another filter changes, instead of leaving it attached to a control nobody is touching', async () => {
+    // Item 5. `rangeFormError` used to be cleared only by another range
+    // submission, so a backwards-range banner outlived the range form
+    // entirely once the person moved on to Sort, Category, or any other
+    // filter — all of which go through `patch()`, the single choke point
+    // every filter change passes through.
+    const fixture = await createFixture();
+    instancesRequest().flush([base]);
+    await fixture.whenStable();
+    await fixture.whenStable();
+
+    fixture.componentInstance.rangeForm.setValue({ from: '2026-01-01', to: '2027-06-01' });
+    fixture.componentInstance.applyRange();
+    await fixture.whenStable();
+    expect(fixture.componentInstance.rangeFormError()).not.toBeNull();
+
+    fixture.componentInstance.setStatus('PAID');
+    await fixture.whenStable();
+    await fixture.whenStable();
+
+    expect(fixture.componentInstance.rangeFormError()).toBeNull();
+    instancesRequest().flush([]);
+    await fixture.whenStable();
+  });
+
   it('applies a valid range', async () => {
     const fixture = await createFixture();
     instancesRequest().flush([]);
@@ -642,6 +667,51 @@ describe('UpcomingComponent URL state', () => {
     await fixture.whenStable();
 
     expect(fixture.nativeElement.textContent).not.toContain('older than');
+  });
+
+  it('discloses that the overdue total could not be confirmed when the summary request fails, rather than failing closed and silent', async () => {
+    // Item 4. `hiddenOverdue` returns null on a failed summary fetch, which
+    // reads identically to "nothing is hidden". A person on the clamped
+    // overdue link while `/api/summary` is down would otherwise see a
+    // truncated list with no hint anything is missing — the exact case
+    // spec §4.3 requires disclosing.
+    await TestBed.inject(Router).navigate([], {
+      queryParams: { overdue: 'true', from: '2026-10-01', to: '2026-10-31' },
+    });
+    const fixture = TestBed.createComponent(UpcomingComponent);
+    billsRequest().flush([]);
+    categoriesRequest().flush([]);
+    await fixture.whenStable();
+    http.expectOne((r) => r.url === '/api/summary').flush(
+      { statusCode: 500, error: 'Internal Server Error', message: 'boom' },
+      { status: 500, statusText: 'Internal Server Error' },
+    );
+    await fixture.whenStable();
+    instancesRequest().flush([]);
+    await fixture.whenStable();
+    await fixture.whenStable();
+
+    expect(fixture.componentInstance.overdueDisclosureUnavailable()).toBe('boom');
+    expect(fixture.nativeElement.textContent).toContain('boom');
+  });
+
+  it('stays quiet about a failed summary request when overdue is not the active filter', async () => {
+    // The summary is irrelevant to any filter other than overdue; a banner
+    // here on every ordinary visit would be noise, not a disclosure.
+    const fixture = TestBed.createComponent(UpcomingComponent);
+    billsRequest().flush([]);
+    categoriesRequest().flush([]);
+    await fixture.whenStable();
+    http.expectOne((r) => r.url === '/api/summary').flush(
+      { statusCode: 500, error: 'Internal Server Error', message: 'boom' },
+      { status: 500, statusText: 'Internal Server Error' },
+    );
+    await fixture.whenStable();
+    instancesRequest().flush([]);
+    await fixture.whenStable();
+    await fixture.whenStable();
+
+    expect(fixture.componentInstance.overdueDisclosureUnavailable()).toBeNull();
   });
 
   it('resyncs the search box when q changes from the URL, not from typing', async () => {

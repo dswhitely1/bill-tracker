@@ -15,7 +15,7 @@ test('a reversed payment leaves both entries in the history', async ({ page }) =
   // Exact match: "Record payment" (the row's button, still in the DOM
   // behind the dialog) otherwise satisfies a substring match on "Record".
   await page.getByRole('button', { name: 'Record', exact: true }).click();
-  await expect(page.getByText('Paid').first()).toBeVisible();
+  await expect(page.getByText('Paid', { exact: true }).first()).toBeVisible();
 
   await page.getByRole('button', { name: 'Reverse this payment' }).first().click();
 

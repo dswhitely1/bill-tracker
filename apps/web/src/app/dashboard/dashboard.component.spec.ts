@@ -220,3 +220,32 @@ describe('DashboardComponent states', () => {
     expect(fixture.nativeElement.querySelector('[role="alert"]')).not.toBeNull();
   });
 });
+
+describe('DashboardComponent refetch', () => {
+  it('refetches the summary on every mount, even when the store already had it loaded', async () => {
+    // Gate 2. `SummaryStore.load()` unforced is a no-op once `loaded` is
+    // true, and its only invalidation is the two mutation counters, which
+    // do not fire when the browser's day turns over. `/upcoming` refetches
+    // on window focus when the day changes; this screen must not rely on a
+    // stale cache instead, or its Overdue card can disagree with
+    // `/upcoming`'s badges by a day after an overnight tab.
+    //
+    // Simulated here by mounting the component twice against the same
+    // (root-scoped) `SummaryStore` — standing in for leaving /dashboard,
+    // visiting another screen, and coming back, which reuses the store but
+    // not the component.
+    const first = await render();
+    expect(first.nativeElement.textContent).toContain('2 bill(s) past due');
+
+    const second = TestBed.createComponent(DashboardComponent);
+    await second.whenStable();
+    summaryRequest().flush({
+      ...payload,
+      overdue: { count: 5, amount: 999, earliestDueDate: '2026-10-01' },
+    });
+    await second.whenStable();
+    await second.whenStable();
+
+    expect(second.nativeElement.textContent).toContain('5 bill(s) past due');
+  });
+});

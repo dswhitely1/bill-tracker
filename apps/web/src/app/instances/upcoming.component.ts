@@ -162,6 +162,12 @@ function serverQueryKey(p: UpcomingParams): string {
       </p>
     }
 
+    @if (overdueDisclosureUnavailable(); as message) {
+      <p class="error" role="alert">
+        Could not confirm whether more overdue bills exist outside this range: {{ message }}
+      </p>
+    }
+
     @if (store.loading()) {
       <mat-progress-bar mode="indeterminate" />
     }
@@ -356,6 +362,22 @@ export class UpcomingComponent {
     return { total: formatMoney(current.overdue.amount), earliest };
   });
 
+  /**
+   * `hiddenOverdue` fails closed: a `null` summary — which includes "the
+   * summary request failed" — reads identically to "every overdue row is
+   * already on screen". A person on the clamped overdue link with
+   * `/api/summary` down would see a truncated list with nothing to say
+   * anything is missing, which is exactly the disclosure spec §4.3
+   * requires.
+   *
+   * Scoped to when `overdue` is the active filter, same as `hiddenOverdue`
+   * itself: the summary is irrelevant to any other filter, and a banner
+   * here would be noise on every ordinary visit to this screen.
+   */
+  readonly overdueDisclosureUnavailable = computed(() =>
+    this.params().overdue === true ? this.summary.error() : null,
+  );
+
   constructor() {
     void this.bills.load();
     void this.categories.load();
@@ -528,6 +550,13 @@ export class UpcomingComponent {
    * the person came from.
    */
   private patch(changes: Partial<UpcomingParams>): void {
+    // Every filter change passes through here, so this is the one place
+    // that can clear a range-form banner once it stops describing the
+    // control the person is touching. Left set, a rejected range's message
+    // would outlive the submission that produced it — still on screen,
+    // attached to nothing, after a Sort or Category change the person made
+    // instead of fixing the dates.
+    this.rangeFormError.set(null);
     // Recorded here, centrally, rather than only in the debounced search
     // subscription — so `setSearch()` (the direct, non-debounced path
     // tests use) gets the same clobber protection as typing does.

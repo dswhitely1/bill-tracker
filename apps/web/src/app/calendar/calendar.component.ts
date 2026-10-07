@@ -248,6 +248,13 @@ export class CalendarComponent {
    * quiescence, and the wait would never settle.
    */
   private loadRange(): void {
+    // The day panel below describes a single day's bills. Every path that
+    // moves `anchor` — prev/next month, Today, and an arrow-key re-anchor in
+    // `focus()` — calls this, so clearing `selected` here is the one site
+    // that closes the panel for all of them. Left open, it would keep
+    // describing a day in the month the viewer just left, and once the new
+    // range lands it would flatly lie about that day having no bills.
+    this.selected.set(null);
     const cells = this.grid();
     void this.store.setQuery({ from: cells[0], to: cells[cells.length - 1] });
   }

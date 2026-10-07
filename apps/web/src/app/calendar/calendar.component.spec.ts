@@ -395,4 +395,21 @@ describe('CalendarComponent drill-down', () => {
     const fixture = await render();
     expect(fixture.nativeElement.querySelector('app-day-detail')).toBeNull();
   });
+
+  it('closes the day panel when the month changes, rather than describing a day that is no longer on screen', async () => {
+    // Gate 1: `selected` used to survive a month change untouched, so the
+    // panel kept naming a day from the month just left — and once the new
+    // month's rows landed, it would flatly claim that day had no bills.
+    const fixture = await render();
+    fixture.nativeElement.querySelector('[data-date="2026-10-09"]').click();
+    await fixture.whenStable();
+    expect(fixture.nativeElement.querySelector('app-day-detail')).not.toBeNull();
+
+    fixture.componentInstance.nextMonth();
+    instancesRequest().flush([]);
+    await fixture.whenStable();
+    await fixture.whenStable();
+
+    expect(fixture.nativeElement.querySelector('app-day-detail')).toBeNull();
+  });
 });
