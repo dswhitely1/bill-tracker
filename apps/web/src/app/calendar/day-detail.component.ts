@@ -1,4 +1,4 @@
-import { ChangeDetectionStrategy, Component, inject, input, signal } from '@angular/core';
+import { ChangeDetectionStrategy, Component, inject, input, linkedSignal } from '@angular/core';
 import { MatButtonModule } from '@angular/material/button';
 import { MatCardModule } from '@angular/material/card';
 import type { BillInstanceResponse } from '@bill-tracker/shared-types';
@@ -70,7 +70,20 @@ export class DayDetailComponent {
 
   private readonly actions = inject(InstanceActionsService);
 
-  readonly actionError = signal<string | null>(null);
+  /**
+   * A `linkedSignal`, not a plain `signal`: `CalendarComponent` renders
+   * this component behind `@if (selected(); as day) { ... }`, which only
+   * destroys and recreates the view on a truthy↔falsy transition of
+   * `selected()` — not when one non-null day replaces another. The same
+   * `DayDetailComponent` instance survives a day-to-day switch, so a plain
+   * signal would carry yesterday's error into today's panel. Resetting to
+   * `null` whenever `date()` changes is exactly what `linkedSignal`'s
+   * `source`/`computation` pair is for.
+   */
+  readonly actionError = linkedSignal<CalendarDate, string | null>({
+    source: this.date,
+    computation: () => null,
+  });
 
   async openPayment(instance: BillInstanceResponse): Promise<void> {
     const result = await this.actions.recordPayment(instance);

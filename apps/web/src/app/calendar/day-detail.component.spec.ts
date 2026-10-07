@@ -10,6 +10,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { BillInstanceResponse } from '@bill-tracker/shared-types';
 import { SessionService } from '../core/auth/session.service';
 import { provideCalendarDateAdapter } from '../core/date/calendar-date.adapter';
+import { InstancesStore } from '../core/state/instances.store';
 import { DayDetailComponent } from './day-detail.component';
 
 let http: HttpTestingController;
@@ -109,6 +110,17 @@ describe('DayDetailComponent', () => {
       afterClosed: () => of({}),
     } as never);
 
+    // Seeds the real `InstancesStore` with the same row the panel is
+    // showing, so `PaymentsService.record`'s `patch()` below has an
+    // existing row to land on — exactly what a real `CalendarComponent`
+    // would already have fetched before this panel ever opened. Without
+    // this, `patch()` finds no row with a matching id, no-ops, and the
+    // assertion below would pass vacuously no matter what `patch()` did.
+    const store = fixture.componentRef.injector.get(InstancesStore);
+    void store.setQuery({ from: '2026-10-09', to: '2026-10-09' });
+    http.expectOne((r) => r.url === '/api/bill-instances').flush([base]);
+    await fixture.whenStable();
+
     fixture.nativeElement.querySelector('button[data-testid="pay"]').click();
     await fixture.whenStable();
 
@@ -127,6 +139,16 @@ describe('DayDetailComponent', () => {
     });
     await fixture.whenStable();
     await fixture.whenStable();
+
+    // What a real `CalendarComponent` would now pass down: the row
+    // `InstancesStore.patch()` just updated, re-read from the store
+    // itself rather than re-derived here, so a store that failed to patch
+    // would carry stale data into this assertion too.
+    fixture.componentRef.setInput('instances', store.instances());
+    await fixture.whenStable();
+
+    expect(fixture.nativeElement.textContent).toContain('Paid');
+    expect(fixture.nativeElement.querySelector('button[data-testid="pay"]')).toBeNull();
   });
 
   it('reports a failed payment instead of looking successful', async () => {
@@ -154,5 +176,38 @@ describe('DayDetailComponent', () => {
     await fixture.whenStable();
 
     expect(fixture.nativeElement.querySelector('[role="alert"]')).not.toBeNull();
+  });
+
+  it('clears a stale error when the day changes', async () => {
+    // `CalendarComponent` renders this panel behind `@if (selected(); as
+    // day) { ... }`, which only destroys and recreates the view on a
+    // truthy↔falsy transition of `selected()` — not when one non-null day
+    // replaces another. The same component instance survives a
+    // day-to-day switch, so without resetting `actionError` on `date()`
+    // changing, a failed payment's message on one day would still be
+    // showing under the next day's panel.
+    const fixture = await render();
+    const dialog = fixture.componentRef.injector.get(MatDialog);
+    vi.spyOn(dialog, 'open').mockReturnValue({
+      afterClosed: () => of({}),
+    } as never);
+
+    fixture.nativeElement.querySelector('button[data-testid="pay"]').click();
+    await fixture.whenStable();
+    http.expectOne((r) => r.url === '/api/bill-instances/inst-1/payments').flush(
+      { statusCode: 409, error: 'Conflict', message: 'Already paid' },
+      { status: 409, statusText: 'Conflict' },
+    );
+    await fixture.whenStable();
+    await fixture.whenStable();
+    await fixture.whenStable();
+    await fixture.whenStable();
+    expect(fixture.nativeElement.querySelector('[role="alert"]')).not.toBeNull();
+
+    fixture.componentRef.setInput('date', '2026-10-15');
+    fixture.componentRef.setInput('instances', []);
+    await fixture.whenStable();
+
+    expect(fixture.nativeElement.querySelector('[role="alert"]')).toBeNull();
   });
 });
