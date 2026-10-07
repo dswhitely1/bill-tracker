@@ -15,9 +15,6 @@
     },
     "e2e": {
       "dependsOn": ["e2e-db-setup"]
-    },
-    "e2e-ci--src/smoke.spec.ts": {
-      "dependsOn": ["e2e-db-setup"]
     }
   }
 }

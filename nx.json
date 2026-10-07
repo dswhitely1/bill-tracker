@@ -69,6 +69,9 @@
     "@angular/build:unit-test": {
       "cache": true,
       "inputs": ["default", "^production"]
+    },
+    "e2e-ci--**/**": {
+      "dependsOn": ["e2e-db-setup"]
     }
   },
   "generators": {
