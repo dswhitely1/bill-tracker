@@ -12,6 +12,7 @@ import { AddBillTables1759622400000 } from './migrations/1759622400000-AddBillTa
 import {
   AddPaymentLogsSignCheck1759708800000,
 } from './migrations/1759708800000-AddPaymentLogsSignCheck';
+import { AddNotifications1759795200000 } from './migrations/1759795200000-AddNotifications';
 
 loadEnv({ path: process.env.ENV_FILE ?? '.env', quiet: true });
 
@@ -36,6 +37,7 @@ export const AppDataSource = new DataSource({
   entities: [User, RefreshToken, Category, Bill, BillInstance, PaymentLog],
   migrations: [
     InitialSchema1759536000000, AddBillTables1759622400000, AddPaymentLogsSignCheck1759708800000,
+    AddNotifications1759795200000,
   ],
   // Without this, a connection checkout the pool can't satisfy hangs
   // forever with no log and no error. Pool sizing (`max`) is left at its

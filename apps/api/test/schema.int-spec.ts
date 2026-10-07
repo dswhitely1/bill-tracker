@@ -145,3 +145,103 @@ describe('bill tables', () => {
     expect(fk.confdeltype).toBe('n'); // 'n' = SET NULL, 'c' would be CASCADE
   });
 });
+
+describe('notifications table', () => {
+  const seedInstance = async (): Promise<{ userId: string; instanceId: string }> => {
+    const [user] = await ds.query(
+      `INSERT INTO "users" ("email","password_hash","name")
+       VALUES ($1,$2,'U') RETURNING "id"`,
+      [`n${Math.random()}@example.com`, 'x'.repeat(60)],
+    );
+    const [bill] = await ds.query(
+      `INSERT INTO "bills" ("user_id","name","default_amount","frequency","start_date")
+       VALUES ($1,'Rent',100,'MONTHLY','2026-01-01') RETURNING "id"`,
+      [user.id],
+    );
+    const [instance] = await ds.query(
+      `INSERT INTO "bill_instances" ("bill_id","user_id","due_date","amount")
+       VALUES ($1,$2,'2026-06-01',100) RETURNING "id"`,
+      [bill.id, user.id],
+    );
+    return { userId: user.id, instanceId: instance.id };
+  };
+
+  it('records a reminder at most once per instance and kind', async () => {
+    const { userId, instanceId } = await seedInstance();
+    await ds.query(
+      `INSERT INTO "notifications" ("user_id","bill_instance_id","kind")
+       VALUES ($1,$2,'DUE_IN_3_DAYS')`,
+      [userId, instanceId],
+    );
+
+    // The same (instance, kind) again must be refused by the database, not
+    // merely avoided by the service. This constraint is the whole
+    // idempotency story for the reminder run (spec §4.3).
+    await expect(
+      ds.query(
+        `INSERT INTO "notifications" ("user_id","bill_instance_id","kind")
+         VALUES ($1,$2,'DUE_IN_3_DAYS')`,
+        [userId, instanceId],
+      ),
+    ).rejects.toThrow(/UQ_notifications_instance_kind|duplicate key/);
+  });
+
+  it('accepts both kinds for one instance', async () => {
+    const { userId, instanceId } = await seedInstance();
+    await ds.query(
+      `INSERT INTO "notifications" ("user_id","bill_instance_id","kind")
+       VALUES ($1,$2,'DUE_IN_3_DAYS'), ($1,$2,'DUE_TOMORROW')`,
+      [userId, instanceId],
+    );
+    const rows = await ds.query(
+      `SELECT "kind" FROM "notifications" WHERE "bill_instance_id" = $1 ORDER BY "kind"`,
+      [instanceId],
+    );
+    expect(rows.map((r: { kind: string }) => r.kind)).toEqual(['DUE_IN_3_DAYS', 'DUE_TOMORROW']);
+  });
+
+  it('refuses a kind the clients cannot render', async () => {
+    const { userId, instanceId } = await seedInstance();
+    await expect(
+      ds.query(
+        `INSERT INTO "notifications" ("user_id","bill_instance_id","kind")
+         VALUES ($1,$2,'DUE_IN_99_DAYS')`,
+        [userId, instanceId],
+      ),
+    ).rejects.toThrow(/CHK_notifications_kind|violates check constraint/);
+  });
+
+  it('removes a reminder when its instance goes away', async () => {
+    const { userId, instanceId } = await seedInstance();
+    await ds.query(
+      `INSERT INTO "notifications" ("user_id","bill_instance_id","kind")
+       VALUES ($1,$2,'DUE_TOMORROW')`,
+      [userId, instanceId],
+    );
+    await ds.query(`DELETE FROM "bill_instances" WHERE "id" = $1`, [instanceId]);
+    const rows = await ds.query(`SELECT 1 FROM "notifications" WHERE "user_id" = $1`, [userId]);
+    expect(rows).toHaveLength(0);
+  });
+
+  it('stores read_at as a nullable instant and created_at as a defaulted one', async () => {
+    const rows = await columnsOf('notifications');
+    const byName = Object.fromEntries(
+      rows.map((r: { column_name: string; data_type: string; is_nullable: string }) => [
+        r.column_name,
+        r,
+      ]),
+    );
+    expect(byName['read_at'].data_type).toBe('timestamp with time zone');
+    expect(byName['read_at'].is_nullable).toBe('YES');
+    expect(byName['created_at'].is_nullable).toBe('NO');
+  });
+
+  it('indexes the two shapes the bell and the list query', async () => {
+    const rows = await ds.query(
+      `SELECT indexname FROM pg_indexes WHERE tablename = 'notifications'`,
+    );
+    const names = rows.map((r: { indexname: string }) => r.indexname);
+    expect(names).toContain('IDX_notifications_user_unread');
+    expect(names).toContain('IDX_notifications_user_created');
+  });
+});
