@@ -146,4 +146,18 @@ describe('the landing screen', () => {
 
     expect(fixture.nativeElement.querySelector('[aria-label="Previous month"]')).not.toBeNull();
   });
+
+  it('mounts the reminders screen at /notifications', async () => {
+    signIn();
+    const router = TestBed.inject(Router);
+    const fixture = TestBed.createComponent(App);
+
+    await router.navigateByUrl('/notifications');
+    await fixture.whenStable();
+    http.expectOne('/api/notifications').flush({ items: [], unreadCount: 0, truncated: false });
+    await fixture.whenStable();
+    await fixture.whenStable();
+
+    expect(fixture.nativeElement.querySelector('h1')?.textContent?.trim()).toBe('Reminders');
+  });
 });
