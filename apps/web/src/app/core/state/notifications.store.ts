@@ -24,13 +24,21 @@ export class NotificationsStore {
   private readonly loadedState = signal(false);
 
   /**
-   * Monotonic request generation. Two fetches can be in flight at once —
-   * e.g. two `visibilitychange` refreshes close together — and resolve
-   * out of order; without this, whichever response lands *last* wins even
-   * if it was issued *first*, which can mean a stale list overwriting rows
-   * a later fetch (or a `markRead`/`markAllRead` patch applied in between)
-   * already settled. Same shape as `InstancesStore.fetchGeneration`,
-   * guarding against the same kind of late arrival.
+   * Monotonic request generation. Bumped in two situations, both of which
+   * make an in-flight `fetch()` response stale:
+   *
+   * - Two fetches overlap and resolve out of order — e.g. two
+   *   `visibilitychange` refreshes close together — so whichever started
+   *   later must win even if it resolves first.
+   * - A `markRead`/`markAllRead` call succeeds against the server while a
+   *   fetch is still in flight. That fetch's response was computed from
+   *   server state *before* the mutation, so applying it now would revert
+   *   the row the mutation just changed — reading as the app losing the
+   *   click. Bumping here, not in `fetch()`, is what lets this one counter
+   *   catch both: a read racing a newer read, and a read racing a write.
+   *
+   * Same shape as `InstancesStore.fetchGeneration`, guarding against the
+   * same kind of late arrival.
    */
   private fetchGeneration = 0;
 
@@ -87,6 +95,18 @@ export class NotificationsStore {
       return;
     }
 
+    // The server write succeeded, so server state has moved on from
+    // whatever any already in-flight fetch is about to return. Bumping
+    // here — only on the success path, since a failed write leaves server
+    // state untouched and an in-flight fetch's response still accurate —
+    // makes that fetch's eventual write a no-op instead of a silent
+    // revert of the row being patched below. The traded cost is accepted:
+    // the in-flight response is discarded wholesale, so any rows that
+    // arrived server-side during that window wait for the next refresh
+    // rather than appearing immediately. That is strictly better than
+    // reverting the click the user just made.
+    this.fetchGeneration++;
+
     this.data.update((items) =>
       items.map((item) => (item.id === id ? { ...item, isRead: true } : item)),
     );
@@ -106,6 +126,10 @@ export class NotificationsStore {
       this.errorState.set(errorMessage(error));
       return;
     }
+    // Same reasoning as `markRead`: only a successful write can have
+    // moved server state, so only a successful write invalidates a fetch
+    // already in flight.
+    this.fetchGeneration++;
     this.data.update((items) => items.map((item) => ({ ...item, isRead: true })));
     this.unread.set(0);
   }

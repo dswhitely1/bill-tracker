@@ -255,6 +255,34 @@ describe('NotificationsStore stale-response guard', () => {
     expect(store.items().find((i) => i.id === 'n1')?.isRead).toBe(true);
     expect(store.unreadCount()).toBe(1);
   });
+
+  it('does not let an in-flight list response undo a mark-read', async () => {
+    const loading = store.load();
+    http.expectOne('/api/notifications').flush(
+      response({ items: [item({ id: 'n1' }), item({ id: 'n2' })], unreadCount: 2 }),
+    );
+    await loading;
+
+    // One refresh in flight — what visibilitychange does — and no second
+    // fetch to bump the generation. Only the mark-read's own bump, on its
+    // success path, can invalidate this response.
+    const refreshing = store.refresh();
+    const inFlight = http.expectOne('/api/notifications');
+
+    const marking = store.markRead('n1');
+    http.expectOne('/api/notifications/n1/read').flush(null);
+    await marking;
+
+    // Only now does the in-flight list response land, still carrying n1 as
+    // unread — the request was issued before the mark-read landed.
+    inFlight.flush(
+      response({ items: [item({ id: 'n1' }), item({ id: 'n2' })], unreadCount: 2 }),
+    );
+    await refreshing;
+
+    expect(store.items().find((i) => i.id === 'n1')?.isRead).toBe(true);
+    expect(store.unreadCount()).toBe(1);
+  });
 });
 
 describe('NotificationsStore session reset', () => {
