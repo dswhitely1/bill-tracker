@@ -1,6 +1,6 @@
 import { provideHttpClient } from '@angular/common/http';
 import { HttpTestingController, provideHttpClientTesting } from '@angular/common/http/testing';
-import { provideZonelessChangeDetection } from '@angular/core';
+import { ApplicationRef, provideZonelessChangeDetection } from '@angular/core';
 import { TestBed } from '@angular/core/testing';
 import { Router, provideRouter } from '@angular/router';
 import { MATERIAL_ANIMATIONS } from '@angular/material/core';
@@ -42,9 +42,17 @@ afterEach(() => {
   vi.restoreAllMocks();
 });
 
+// The bell fetches on construction, so every ShellComponent fixture opens
+// one outstanding `/api/notifications` request that `http.verify()` would
+// otherwise fail on.
+const flushNotifications = () => {
+  http.expectOne('/api/notifications').flush({ items: [], unreadCount: 0, truncated: false });
+};
+
 describe('ShellComponent', () => {
   it('names the signed-in user', async () => {
     const fixture = TestBed.createComponent(ShellComponent);
+    flushNotifications();
     await fixture.whenStable();
 
     expect(fixture.nativeElement.textContent).toContain('Ada Lovelace');
@@ -52,6 +60,7 @@ describe('ShellComponent', () => {
 
   it('links to every section', async () => {
     const fixture = TestBed.createComponent(ShellComponent);
+    flushNotifications();
     await fixture.whenStable();
 
     const hrefs = [...fixture.nativeElement.querySelectorAll('a[href]')].map((a: HTMLAnchorElement) =>
@@ -65,6 +74,7 @@ describe('ShellComponent', () => {
   it('signs out and returns to the login screen', async () => {
     const navigate = vi.spyOn(router, 'navigateByUrl').mockResolvedValue(true);
     const fixture = TestBed.createComponent(ShellComponent);
+    flushNotifications();
     await fixture.whenStable();
 
     fixture.nativeElement.querySelector('[data-testid="sign-out"]').click();
@@ -73,5 +83,20 @@ describe('ShellComponent', () => {
 
     expect(session.isAuthenticated()).toBe(false);
     expect(navigate).toHaveBeenCalledWith('/login');
+  });
+
+  it('puts the bell in the toolbar, ahead of sign out', async () => {
+    const fixture = TestBed.createComponent(ShellComponent);
+    fixture.detectChanges();
+    flushNotifications();
+    await TestBed.inject(ApplicationRef).whenStable();
+    fixture.detectChanges();
+
+    const bell = fixture.nativeElement.querySelector('app-notification-bell');
+    const signOut = fixture.nativeElement.querySelector('[data-testid="sign-out"]');
+    expect(bell).not.toBeNull();
+    // A reminder the user has to navigate to is a reminder they will miss,
+    // so it belongs in the chrome that is always on screen.
+    expect(bell.compareDocumentPosition(signOut) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
   });
 });

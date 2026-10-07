@@ -92,6 +92,16 @@ describe('the guarded area', () => {
   });
 });
 
+/**
+ * The shell that wraps every signed-in route mounts the toolbar bell,
+ * which fetches `/api/notifications` on construction. All four of these
+ * tests route into the shell, so each opens that request in addition to
+ * whatever its own page fetches.
+ */
+const flushBell = () => {
+  http.expectOne('/api/notifications').flush({ items: [], unreadCount: 0, truncated: false });
+};
+
 describe('the landing screen', () => {
   it('redirects the bare origin to the dashboard', async () => {
     signIn();
@@ -100,6 +110,7 @@ describe('the landing screen', () => {
 
     await router.navigateByUrl('/');
     await fixture.whenStable();
+    flushBell();
     http.expectOne('/api/summary').flush({
       asOf: '2026-10-07',
       overdue: { count: 0, amount: 0, earliestDueDate: null },
@@ -120,6 +131,7 @@ describe('the landing screen', () => {
 
     await router.navigateByUrl('/dashboard');
     await fixture.whenStable();
+    flushBell();
     http.expectOne('/api/summary').flush({
       asOf: '2026-10-07',
       overdue: { count: 0, amount: 0, earliestDueDate: null },
@@ -140,6 +152,7 @@ describe('the landing screen', () => {
 
     await router.navigateByUrl('/calendar');
     await fixture.whenStable();
+    flushBell();
     http.expectOne((req) => req.url === '/api/bill-instances').flush([]);
     await fixture.whenStable();
     await fixture.whenStable();
@@ -154,7 +167,14 @@ describe('the landing screen', () => {
 
     await router.navigateByUrl('/notifications');
     await fixture.whenStable();
-    http.expectOne('/api/notifications').flush({ items: [], unreadCount: 0, truncated: false });
+    // The bell and the reminders page both construct here and both call
+    // `NotificationsStore.load()`. `load()` only skips a refetch once the
+    // first one has *resolved* — it has no in-flight guard — so both
+    // calls land before either response arrives and two requests go out
+    // against the one shared store instance.
+    for (const req of http.match('/api/notifications')) {
+      req.flush({ items: [], unreadCount: 0, truncated: false });
+    }
     await fixture.whenStable();
     await fixture.whenStable();
 
