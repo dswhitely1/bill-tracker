@@ -65,7 +65,7 @@ describe('renderDigest', () => {
   it('formats the balance as currency rather than a bare number', () => {
     const text = render([{ ...rent, amountDue: 1234.5 }]).text;
     expect(text).toContain('$1,234.50');
-    expect(text).not.toContain('1234.5 ');
+    expect(text).not.toContain('1234.5');
   });
 
   it('shows the balance outstanding, which a partial payment has reduced', () => {
