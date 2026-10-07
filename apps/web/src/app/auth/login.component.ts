@@ -31,7 +31,7 @@ import { safeReturnUrl } from '../shared/return-url';
           <mat-progress-bar mode="indeterminate" />
         }
         <mat-card-header>
-          <mat-card-title>Sign in</mat-card-title>
+          <h1 mat-card-title>Sign in</h1>
         </mat-card-header>
         <mat-card-content>
           @if (expired()) {

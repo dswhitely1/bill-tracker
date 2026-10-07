@@ -22,16 +22,14 @@ import { DataSource } from 'typeorm';
  * starts every `webServer` before running `globalSetup`, so wiring this
  * through that field would deadlock against the API server it is
  * supposed to prepare the database for.
+ *
+ * `url` is a parameter rather than an environment variable this function
+ * reads for itself: `bootstrap-db.ts` and `playwright.config.ts` both
+ * import the one constant in `support/database-url.ts`, and threading it
+ * through as a parameter is what keeps this function from needing its
+ * own copy of that string or its own env-var plumbing.
  */
-export default async function globalSetup(): Promise<void> {
-  const url = process.env['E2E_DATABASE_URL'];
-  if (!url) {
-    throw new Error(
-      'E2E_DATABASE_URL is not set. The e2e-db-setup Nx target defines it; ' +
-        'this almost certainly means this script was invoked outside that target.',
-    );
-  }
-
+export default async function globalSetup(url: string): Promise<void> {
   const target = new URL(url);
   const databaseName = target.pathname.slice(1);
 

@@ -10,13 +10,13 @@
       "executor": "nx:run-commands",
       "options": {
         "cwd": "apps/web-e2e",
-        "command": "node src/bootstrap-db.ts",
-        "env": {
-          "E2E_DATABASE_URL": "postgres://don:super@localhost:5432/bills_web_e2e"
-        }
+        "command": "node src/bootstrap-db.ts"
       }
     },
     "e2e": {
+      "dependsOn": ["e2e-db-setup"]
+    },
+    "e2e-ci--src/smoke.spec.ts": {
       "dependsOn": ["e2e-db-setup"]
     }
   }

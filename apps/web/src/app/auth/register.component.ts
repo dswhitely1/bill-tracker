@@ -31,7 +31,7 @@ import { applyServerErrors } from '../shared/server-errors';
           <mat-progress-bar mode="indeterminate" />
         }
         <mat-card-header>
-          <mat-card-title>Create an account</mat-card-title>
+          <h1 mat-card-title>Create an account</h1>
         </mat-card-header>
         <mat-card-content>
           @for (message of formErrors(); track message) {

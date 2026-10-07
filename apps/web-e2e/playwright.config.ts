@@ -1,9 +1,9 @@
 import { defineConfig, devices } from '@playwright/test';
 import { workspaceRoot } from '@nx/devkit';
+import { E2E_DATABASE_URL } from './src/support/database-url.ts';
 
 const API_PORT = 3100;
 const WEB_PORT = 4300;
-const DATABASE_URL = 'postgres://don:super@localhost:5432/bills_web_e2e';
 
 /**
  * Every value the API needs, passed directly rather than through a file.
@@ -18,7 +18,7 @@ const DATABASE_URL = 'postgres://don:super@localhost:5432/bills_web_e2e';
 const apiEnv = {
   NODE_ENV: 'test',
   PORT: String(API_PORT),
-  DATABASE_URL,
+  DATABASE_URL: E2E_DATABASE_URL,
   DB_SSL: 'false',
   JWT_ACCESS_SECRET: 'playwright-e2e-only-not-a-real-secret-0123456789',
   JWT_ACCESS_TTL: '15m',

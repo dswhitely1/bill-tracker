@@ -1,4 +1,5 @@
 import globalSetup from './global-setup.ts';
+import { E2E_DATABASE_URL } from './support/database-url.ts';
 
 /**
  * Runs the database bootstrap ahead of `playwright test` itself, as an Nx
@@ -14,7 +15,7 @@ import globalSetup from './global-setup.ts';
  * Playwright is still waiting on the API's `/api/health` to answer.
  * Running it as a preceding Nx target sidesteps that ordering entirely.
  */
-globalSetup().catch((error: unknown) => {
+globalSetup(E2E_DATABASE_URL).catch((error: unknown) => {
   console.error(error);
   process.exitCode = 1;
 });

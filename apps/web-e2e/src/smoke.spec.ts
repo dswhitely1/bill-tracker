@@ -4,10 +4,7 @@ import { newAccount } from './support/accounts';
 test('an anonymous visitor lands on the sign-in screen', async ({ page }) => {
   await page.goto('/');
 
-  // Not getByRole('heading', ...): `mat-card-title` renders as a plain
-  // element with no ARIA heading role (Angular Material's MatCardTitle
-  // sets none), unlike the Upcoming screen's actual `<h1>` asserted below.
-  await expect(page.locator('mat-card-title')).toHaveText('Sign in');
+  await expect(page.getByRole('heading', { name: 'Sign in' })).toBeVisible();
   await expect(page).toHaveURL(/\/login/);
 });
 
