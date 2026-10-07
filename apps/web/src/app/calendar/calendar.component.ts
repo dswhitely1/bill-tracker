@@ -85,6 +85,7 @@ interface DayCell {
               class="cell"
               [class.outside]="!cell.inMonth"
               [class.today]="cell.isToday"
+              [attr.aria-selected]="cell.date === selected()"
             >
               <button
                 type="button"
@@ -92,7 +93,6 @@ interface DayCell {
                 [attr.data-date]="cell.date"
                 [attr.tabindex]="cell.date === focused() ? 0 : -1"
                 [attr.aria-label]="cell.label"
-                [attr.aria-selected]="cell.date === selected()"
                 (click)="select(cell.date)"
                 (focus)="focused.set(cell.date)"
               >

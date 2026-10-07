@@ -218,16 +218,23 @@ describe('CalendarComponent grid', () => {
   });
 
   it('marks the selected cell with aria-selected, not aria-pressed', async () => {
-    // `aria-pressed` signals toggle-button state; `aria-selected` is the
-    // conventional attribute for selection within a grid.
+    // `aria-selected` is a supported state only on roles `option`, `row`,
+    // `tab`, `treeitem`, `gridcell`, `columnheader`, and `rowheader` — so it
+    // belongs on the `role="gridcell"` div, not the `<button>` inside it,
+    // whose implicit role is `button` and does not support it.
+    // `aria-pressed` signals toggle-button state and would have been valid
+    // on the button; it must appear nowhere, since selection is not a
+    // toggle.
     const fixture = await render();
-    const cell = fixture.nativeElement.querySelector('[data-date="2026-10-09"]');
-    expect(cell.getAttribute('aria-selected')).toBe('false');
-    expect(cell.hasAttribute('aria-pressed')).toBe(false);
+    const button = fixture.nativeElement.querySelector('[data-date="2026-10-09"]');
+    const gridcell = button.closest('[role="gridcell"]');
+    expect(gridcell.getAttribute('aria-selected')).toBe('false');
+    expect(button.hasAttribute('aria-pressed')).toBe(false);
+    expect(gridcell.hasAttribute('aria-pressed')).toBe(false);
 
     fixture.componentInstance.select('2026-10-09');
     await fixture.whenStable();
-    expect(cell.getAttribute('aria-selected')).toBe('true');
+    expect(gridcell.getAttribute('aria-selected')).toBe('true');
   });
 });
 
