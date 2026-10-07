@@ -2,7 +2,7 @@ import { provideHttpClient } from '@angular/common/http';
 import { HttpTestingController, provideHttpClientTesting } from '@angular/common/http/testing';
 import { provideZonelessChangeDetection } from '@angular/core';
 import { ComponentFixture, TestBed } from '@angular/core/testing';
-import { provideRouter } from '@angular/router';
+import { provideRouter, Router } from '@angular/router';
 import { MATERIAL_ANIMATIONS } from '@angular/material/core';
 import { MatDialog } from '@angular/material/dialog';
 import { of } from 'rxjs';
@@ -43,6 +43,54 @@ function billsRequest() {
   return http.expectOne((r) => r.url === '/api/bills');
 }
 
+/**
+ * The component loads `CategoriesStore` for the category filter's options,
+ * so every fixture must answer this request too or `http.verify()` fails.
+ */
+function categoriesRequest() {
+  return http.expectOne((r) => r.url === '/api/categories');
+}
+
+/**
+ * The component also loads `SummaryStore`, for the overdue disclosure. All
+ * three of these fire from the constructor, so they are answered before
+ * the first `whenStable()` — a pending request would otherwise keep the
+ * fixture from ever reaching quiescence.
+ */
+const emptySummary = {
+  asOf: '2026-10-15',
+  overdue: { count: 0, amount: 0, earliestDueDate: null },
+  thisMonth: { count: 0, total: 0, paid: 0 },
+  next7Days: { count: 0, amount: 0 },
+  byCategory: [],
+};
+
+/**
+ * Creates the fixture and answers the three constructor-time requests.
+ *
+ * The summary request is flushed only after an intermediate `whenStable()`,
+ * not alongside bills and categories. `SummaryStore`'s mutation-watching
+ * effect reads its own `loaded` flag `untracked` so that reacting to it
+ * does not also depend on it — but that guard only protects *reruns*. The
+ * effect's own first run is scheduled, not synchronous, and if this
+ * store's fetch already resolved by the time that first run happens, the
+ * effect sees `loaded() === true` on what it thinks is a plain
+ * dependency-registration pass and fires an unsolicited second
+ * `GET /api/summary`. Flushing bills and categories, letting a tick run
+ * (which is where that first, dependency-registering pass actually
+ * happens, while `loaded()` is still false), and only then flushing
+ * summary avoids the race.
+ */
+async function createFixture(summary: unknown = emptySummary) {
+  const fixture = TestBed.createComponent(UpcomingComponent);
+  billsRequest().flush([]);
+  categoriesRequest().flush([]);
+  await fixture.whenStable();
+  http.expectOne((r) => r.url === '/api/summary').flush(summary as object);
+  await fixture.whenStable();
+  return fixture;
+}
+
 beforeEach(() => {
   TestBed.configureTestingModule({
     imports: [UpcomingComponent],
@@ -68,9 +116,7 @@ afterEach(() => {
 
 describe('UpcomingComponent', () => {
   it('lists instances with their bill name, due date, and amount', async () => {
-    const fixture = TestBed.createComponent(UpcomingComponent);
-    billsRequest().flush([]);
-    await fixture.whenStable();
+    const fixture = await createFixture();
     instancesRequest().flush([base]);
     await fixture.whenStable();
     // Twice: the store resumes its `load()` one microtask after
@@ -87,9 +133,7 @@ describe('UpcomingComponent', () => {
   });
 
   it('defaults to the current month', async () => {
-    const fixture = TestBed.createComponent(UpcomingComponent);
-    billsRequest().flush([]);
-    await fixture.whenStable();
+    await createFixture();
 
     const req = instancesRequest();
     const from = req.request.params.get('from') ?? '';
@@ -100,9 +144,7 @@ describe('UpcomingComponent', () => {
   });
 
   it('names the empty state rather than rendering a blank table', async () => {
-    const fixture = TestBed.createComponent(UpcomingComponent);
-    billsRequest().flush([]);
-    await fixture.whenStable();
+    const fixture = await createFixture();
     instancesRequest().flush([]);
     await fixture.whenStable();
     await fixture.whenStable();
@@ -111,9 +153,7 @@ describe('UpcomingComponent', () => {
   });
 
   it('shows the amount still owed on a partially paid instance', async () => {
-    const fixture = TestBed.createComponent(UpcomingComponent);
-    billsRequest().flush([]);
-    await fixture.whenStable();
+    const fixture = await createFixture();
     instancesRequest().flush([
       { ...base, status: 'PARTIALLY_PAID', amountPaid: 500 },
     ]);
@@ -130,9 +170,7 @@ describe('overdue comes from the server', () => {
     // APP_TIMEZONE. A browser in UTC+14 or UTC-11 is on a different
     // calendar day, so a locally derived badge would disagree with the
     // API on exactly the rows a person cares most about.
-    const fixture = TestBed.createComponent(UpcomingComponent);
-    billsRequest().flush([]);
-    await fixture.whenStable();
+    const fixture = await createFixture();
     instancesRequest().flush([{ ...base, dueDate: '2099-01-01', isOverdue: true }]);
     await fixture.whenStable();
     await fixture.whenStable();
@@ -144,9 +182,7 @@ describe('overdue comes from the server', () => {
   });
 
   it('does not mark a row overdue when the server says it is not, however old it is', async () => {
-    const fixture = TestBed.createComponent(UpcomingComponent);
-    billsRequest().flush([]);
-    await fixture.whenStable();
+    const fixture = await createFixture();
     instancesRequest().flush([{ ...base, dueDate: '2000-01-01', isOverdue: false }]);
     await fixture.whenStable();
     await fixture.whenStable();
@@ -156,37 +192,42 @@ describe('overdue comes from the server', () => {
 });
 
 describe('the range controls', () => {
-  it('refuses an over-wide range with a message and sends nothing', async () => {
-    const fixture = TestBed.createComponent(UpcomingComponent);
-    billsRequest().flush([]);
-    await fixture.whenStable();
+  it('falls back to the current range when an invalid one is submitted, keeping existing rows', async () => {
+    // The filters are URL params now (Task 7): an invalid range submitted
+    // through the picker is sanitised by `parseUpcomingParams` rather than
+    // surfaced as a form error — see "renders the default view for a
+    // malformed URL instead of erroring" below, which is the same
+    // behaviour reached by typing the bad range into the address bar
+    // directly. The range it falls back to is the same current month the
+    // screen already loaded, so no second request is sent and the rows
+    // already on screen are undisturbed.
+    const fixture = await createFixture();
     instancesRequest().flush([base]);
     await fixture.whenStable();
     await fixture.whenStable();
 
     fixture.componentInstance.rangeForm.setValue({ from: '2026-01-01', to: '2027-06-01' });
-    await fixture.componentInstance.applyRange();
+    fixture.componentInstance.applyRange();
+    await fixture.whenStable();
     await fixture.whenStable();
 
     expect(http.match((r) => r.url === '/api/bill-instances')).toHaveLength(0);
-    expect(fixture.nativeElement.textContent).toContain('400');
     expect(fixture.nativeElement.textContent).toContain('Rent');
   });
 
   it('applies a valid range', async () => {
-    const fixture = TestBed.createComponent(UpcomingComponent);
-    billsRequest().flush([]);
-    await fixture.whenStable();
+    const fixture = await createFixture();
     instancesRequest().flush([]);
     await fixture.whenStable();
     await fixture.whenStable();
 
     fixture.componentInstance.rangeForm.setValue({ from: '2026-11-01', to: '2026-11-30' });
-    const applied = fixture.componentInstance.applyRange();
+    fixture.componentInstance.applyRange();
+    await fixture.whenStable();
     const req = instancesRequest();
     expect(req.request.params.get('from')).toBe('2026-11-01');
     req.flush([]);
-    await applied;
+    await fixture.whenStable();
   });
 });
 
@@ -195,35 +236,36 @@ describe('the bill filter', () => {
   // already support billId (store spec proves it reaches the wire), but
   // the component rendered no control for it.
   it('puts the chosen bill id on the request', async () => {
-    const fixture = TestBed.createComponent(UpcomingComponent);
-    billsRequest().flush([{ id: 'bill-1', categoryId: null, name: 'Rent', defaultAmount: 1200, frequency: 'MONTHLY', startDate: '2026-01-01', endDate: null, isActive: true }]);
-    await fixture.whenStable();
+    // A real UUID, not 'bill-1': `parseUpcomingParams`' `readUuid` would
+    // otherwise silently drop it on the URL round trip, and the request
+    // this test is checking for would never be sent.
+    const billId = '11111111-1111-1111-1111-111111111111';
+    const fixture = await createFixture();
     instancesRequest().flush([]);
     await fixture.whenStable();
     await fixture.whenStable();
 
-    fixture.componentInstance.setBillId('bill-1');
-    const applied = fixture.componentInstance.applyRange();
+    // Setting the filter alone patches the URL and refetches now; there is
+    // no separate "apply" step for anything but the date range.
+    fixture.componentInstance.setBillId(billId);
+    await fixture.whenStable();
+    await fixture.whenStable();
     const req = instancesRequest();
-    expect(req.request.params.get('billId')).toBe('bill-1');
+    expect(req.request.params.get('billId')).toBe(billId);
     req.flush([]);
-    await applied;
+    await fixture.whenStable();
   });
 
   it('omits billId when "Any bill" is selected', async () => {
-    const fixture = TestBed.createComponent(UpcomingComponent);
-    billsRequest().flush([]);
-    await fixture.whenStable();
+    const fixture = await createFixture();
     instancesRequest().flush([]);
     await fixture.whenStable();
     await fixture.whenStable();
 
     fixture.componentInstance.setBillId(null);
-    const applied = fixture.componentInstance.applyRange();
-    const req = instancesRequest();
-    expect(req.request.params.has('billId')).toBe(false);
-    req.flush([]);
-    await applied;
+    await fixture.whenStable();
+
+    expect(http.match((r) => r.url === '/api/bill-instances')).toHaveLength(0);
   });
 });
 
@@ -231,9 +273,7 @@ describe('the day boundary', () => {
   it('refetches when the browser day has changed since the rows were fetched', async () => {
     // `isOverdue` goes stale at midnight. A tab left open overnight would
     // otherwise show yesterday's answer indefinitely.
-    const fixture = TestBed.createComponent(UpcomingComponent);
-    billsRequest().flush([]);
-    await fixture.whenStable();
+    const fixture = await createFixture();
     instancesRequest().flush([base]);
     await fixture.whenStable();
     await fixture.whenStable();
@@ -252,9 +292,7 @@ describe('the day boundary', () => {
   });
 
   it('does not refetch when the day is unchanged', async () => {
-    const fixture = TestBed.createComponent(UpcomingComponent);
-    billsRequest().flush([]);
-    await fixture.whenStable();
+    const fixture = await createFixture();
     instancesRequest().flush([base]);
     await fixture.whenStable();
     await fixture.whenStable();
@@ -273,9 +311,7 @@ describe('the day boundary', () => {
     // let a refused submission convince `refreshIfDayChanged` that stale
     // rows were fresh. The store now owns the marker and only advances it
     // on a fetch that actually succeeds.
-    const fixture = TestBed.createComponent(UpcomingComponent);
-    billsRequest().flush([]);
-    await fixture.whenStable();
+    const fixture = await createFixture();
     instancesRequest().flush([base]);
     await fixture.whenStable();
     await fixture.whenStable();
@@ -327,10 +363,8 @@ const payment = {
 
 describe('payment actions', () => {
   it('records a payment and patches the row from the response', async () => {
-    const fixture = TestBed.createComponent(UpcomingComponent);
-    billsRequest().flush([]);
+    const fixture = await createFixture();
     dialogReturning(fixture, { note: null });
-    await fixture.whenStable();
     instancesRequest().flush([base]);
     await fixture.whenStable();
     await fixture.whenStable();
@@ -347,14 +381,18 @@ describe('payment actions', () => {
     await fixture.whenStable();
     await fixture.whenStable();
 
+    // A successful payment bumps `PaymentsService.mutations()`, which is
+    // exactly what `SummaryStore`'s own effect watches for — correctly, a
+    // payment changes every one of its buckets. The resulting background
+    // refetch is answered here so `http.verify()` finds nothing pending.
+    http.expectOne((r) => r.url === '/api/summary').flush(emptySummary);
+
     expect(fixture.nativeElement.textContent).toContain('Paid');
   });
 
   it('shows a failed payment without changing the row', async () => {
-    const fixture = TestBed.createComponent(UpcomingComponent);
-    billsRequest().flush([]);
+    const fixture = await createFixture();
     dialogReturning(fixture, { note: null });
-    await fixture.whenStable();
     instancesRequest().flush([base]);
     await fixture.whenStable();
     await fixture.whenStable();
@@ -373,10 +411,8 @@ describe('payment actions', () => {
   });
 
   it('sends nothing when the dialog is dismissed', async () => {
-    const fixture = TestBed.createComponent(UpcomingComponent);
-    billsRequest().flush([]);
+    const fixture = await createFixture();
     dialogReturning(fixture, undefined);
-    await fixture.whenStable();
     instancesRequest().flush([base]);
     await fixture.whenStable();
     await fixture.whenStable();
@@ -388,10 +424,8 @@ describe('payment actions', () => {
 
   it('clears payments and patches the row from the bare instance response', async () => {
     const partiallyPaid = { ...base, status: 'PARTIALLY_PAID' as const, amountPaid: 500 };
-    const fixture = TestBed.createComponent(UpcomingComponent);
-    billsRequest().flush([]);
+    const fixture = await createFixture();
     dialogReturning(fixture, 'confirm');
-    await fixture.whenStable();
     instancesRequest().flush([partiallyPaid]);
     await fixture.whenStable();
     await fixture.whenStable();
@@ -407,7 +441,165 @@ describe('payment actions', () => {
     await fixture.whenStable();
     await fixture.whenStable();
 
+    // Same background refetch as above: `unpay` also bumps
+    // `PaymentsService.mutations()`.
+    http.expectOne((r) => r.url === '/api/summary').flush(emptySummary);
+
     expect(fixture.nativeElement.textContent).toContain('Unpaid');
     expect(fixture.nativeElement.textContent).not.toContain('paid of');
+  });
+});
+
+describe('UpcomingComponent URL state', () => {
+  it('reads its filters from the query string rather than from component state', async () => {
+    await TestBed.inject(Router).navigate([], {
+      queryParams: { from: '2026-03-01', to: '2026-03-31', status: 'PAID', overdue: 'false' },
+    });
+
+    await createFixture();
+    const req = instancesRequest();
+
+    expect(req.request.params.get('from')).toBe('2026-03-01');
+    expect(req.request.params.get('to')).toBe('2026-03-31');
+    expect(req.request.params.get('status')).toBe('PAID');
+    expect(req.request.params.get('overdue')).toBe('false');
+    req.flush([]);
+  });
+
+  it('renders the default view for a malformed URL instead of erroring', async () => {
+    await TestBed.inject(Router).navigate([], {
+      queryParams: { status: 'BANANA', from: '2026-13-45', sort: 'nonsense', overdue: 'maybe' },
+    });
+
+    const fixture = await createFixture();
+    const req = instancesRequest();
+
+    // Nothing invalid reaches the API...
+    expect(req.request.params.has('status')).toBe(false);
+    expect(req.request.params.has('overdue')).toBe(false);
+    const from = req.request.params.get('from') ?? '';
+    expect(from.endsWith('-01')).toBe(true);
+    req.flush([]);
+    await fixture.whenStable();
+    await fixture.whenStable();
+
+    // ...and the component settled on real defaults rather than carrying
+    // the garbage forward. Asserting the absence of "BANANA" from the DOM
+    // would pass even if the parse had failed entirely, because that word
+    // is never rendered under any circumstances.
+    expect(fixture.componentInstance.params().status).toBeNull();
+    expect(fixture.componentInstance.params().overdue).toBeNull();
+    expect(fixture.componentInstance.params().sort).toBe('dueDate');
+  });
+
+  it('writes a filter change back into the URL', async () => {
+    const fixture = await createFixture();
+    instancesRequest().flush([]);
+    await fixture.whenStable();
+    await fixture.whenStable();
+
+    fixture.componentInstance.setStatus('PAID');
+    await fixture.whenStable();
+
+    expect(TestBed.inject(Router).url).toContain('status=PAID');
+    instancesRequest().flush([]);
+  });
+
+  it('does not refetch when only a client-side filter changes', async () => {
+    // A real UUID, not 'cat-1': `parseUpcomingParams`' `readCategoryId`
+    // validates the shape of anything that survives the URL round trip,
+    // so a non-UUID value would silently parse back to `null` and this
+    // test would pass without ever exercising the category filter.
+    const categoryId = '22222222-2222-2222-2222-222222222222';
+    const fixture = await createFixture();
+    instancesRequest().flush([
+      { ...base, id: 'a', billName: 'Electric', categoryId },
+      { ...base, id: 'b', billName: 'Rent', categoryId: null },
+    ]);
+    await fixture.whenStable();
+    await fixture.whenStable();
+
+    // Sorting and searching run over rows already in memory. A refetch here
+    // would issue a request per keystroke.
+    fixture.componentInstance.setSort('amount');
+    await fixture.whenStable();
+    fixture.componentInstance.setCategoryId(categoryId);
+    await fixture.whenStable();
+
+    http.expectNone((r) => r.url === '/api/bill-instances');
+    // The client-side path actually ran: `setCategoryId` is only
+    // meaningful without a refetch if the in-memory filter in `visible()`
+    // reacted to it. Only the row carrying this category survives.
+    const text = fixture.nativeElement.textContent;
+    expect(text).toContain('Electric');
+    expect(text).not.toContain('Rent');
+  });
+
+  it('applies the search term to the rows it already holds', async () => {
+    const fixture = await createFixture();
+    instancesRequest().flush([
+      { ...base, id: 'a', billName: 'Electric' },
+      { ...base, id: 'b', billName: 'Rent' },
+    ]);
+    await fixture.whenStable();
+    await fixture.whenStable();
+
+    fixture.componentInstance.setSearch('elec');
+    await fixture.whenStable();
+    await fixture.whenStable();
+
+    const text = fixture.nativeElement.textContent;
+    expect(text).toContain('Electric');
+    expect(text).not.toContain('Rent');
+  });
+
+  it('orders rows by the chosen sort key', async () => {
+    const fixture = await createFixture();
+    instancesRequest().flush([
+      { ...base, id: 'a', billName: 'Alpha', amount: 50 },
+      { ...base, id: 'b', billName: 'Beta', amount: 900 },
+    ]);
+    await fixture.whenStable();
+    await fixture.whenStable();
+
+    fixture.componentInstance.setSort('amount');
+    fixture.componentInstance.setDir('desc');
+    await fixture.whenStable();
+    await fixture.whenStable();
+
+    const text: string = fixture.nativeElement.textContent;
+    expect(text.indexOf('Beta')).toBeLessThan(text.indexOf('Alpha'));
+  });
+
+  it('discloses overdue rows that fall outside the range it can show', async () => {
+    await TestBed.inject(Router).navigate([], {
+      queryParams: { overdue: 'true', from: '2026-10-01', to: '2026-10-31' },
+    });
+    // The summary's all-time figure reaches further back than the range.
+    const fixture = await createFixture({
+      ...emptySummary,
+      overdue: { count: 3, amount: 450, earliestDueDate: '2024-01-05' },
+    });
+    instancesRequest().flush([]);
+    await fixture.whenStable();
+    await fixture.whenStable();
+
+    expect(fixture.nativeElement.textContent).toContain('$450.00');
+    expect(fixture.nativeElement.textContent).toContain('older than');
+  });
+
+  it('shows no disclosure when the range already covers every overdue row', async () => {
+    await TestBed.inject(Router).navigate([], {
+      queryParams: { overdue: 'true', from: '2026-01-01', to: '2026-10-31' },
+    });
+    const fixture = await createFixture({
+      ...emptySummary,
+      overdue: { count: 1, amount: 100, earliestDueDate: '2026-02-01' },
+    });
+    instancesRequest().flush([]);
+    await fixture.whenStable();
+    await fixture.whenStable();
+
+    expect(fixture.nativeElement.textContent).not.toContain('older than');
   });
 });
