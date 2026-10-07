@@ -9,12 +9,51 @@ tokens, and the user and category resources everything else depends on.
 - Node.js ≥ 24.11
 - Docker (for PostgreSQL via Docker Compose)
 
-## Setup
+## Running the whole stack
 
-1. Start the database:
+`docker compose` brings up everything — Postgres, the API, the Angular
+client behind nginx, and a mail catcher — with no Node toolchain needed:
+
+```bash
+echo "JWT_ACCESS_SECRET=$(node -e "console.log(require('crypto').randomBytes(32).toString('hex'))")" >> .env
+docker compose up -d --build --wait
+```
+
+| | |
+|---|---|
+| Application | <http://localhost:8080> |
+| Reminder digests | <http://localhost:8025> (Mailpit) |
+| API, for `curl` | <http://localhost:3000/api> |
+
+`JWT_ACCESS_SECRET` has no default anywhere, compose included — the file
+references it as `${JWT_ACCESS_SECRET:?...}`, so compose refuses to start
+rather than signing tokens with a value committed to source control.
+
+Three things worth knowing about how this is wired:
+
+- **nginx proxies `/api` to the API** rather than the browser talking to
+  port 3000 directly. The client requests the relative path `/api`, baked
+  into the bundle at build time, so it goes wherever the bundle was served
+  from. Proxying also keeps the refresh cookie first-party — the same
+  arrangement `apps/web/proxy.conf.json` makes in development, and what
+  the auth design assumes when it sets `SameSite=Lax`.
+- **A one-shot `migrate` service applies the schema** before the API
+  starts, via `depends_on: service_completed_successfully`. A failed
+  migration holds the API back instead of letting it serve against a
+  schema that was never applied. `docker compose logs migrate` names
+  each migration it applied.
+- **Code changes need `--build`.** These are production images, not bind
+  mounts; `npx nx serve` below remains the fast edit loop.
+
+`docker compose down` stops everything and keeps your data. Adding `-v`
+would delete the Postgres volume.
+
+## Setup for local development
+
+1. Start just the database:
 
    ```bash
-   docker compose up -d --wait
+   docker compose up -d --wait postgres
    ```
 
 2. Install dependencies:
@@ -79,6 +118,8 @@ tokens, and the user and category resources everything else depends on.
 | `BCRYPT_COST` | `12` | bcrypt cost factor for password hashing |
 | `WEB_ORIGIN` | — | the origin CORS is configured to allow |
 | `APP_TIMEZONE` | `UTC` | IANA timezone (e.g. `America/New_York`) governing every date the API computes — due dates, overdue derivation, and the nightly horizon roll |
+| `SMTP_URL` | — | optional; absent selects the logging transport, so reminder digests go to the application log. Set it and mail is sent for real. May carry a password, so it has no default |
+| `MAIL_FROM` | — | required *only* when `SMTP_URL` is set; the sender address on reminder digests |
 
 ## Testing and linting
 

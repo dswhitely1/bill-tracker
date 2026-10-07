@@ -196,3 +196,8 @@ test-output
 test-results
 playwright-report
 blob-report
+
+# The migration runner's bundle (apps/api, `build-migrate`). Its own directory
+# rather than dist/ because both webpack configs clean their output path, so
+# sharing one would mean whichever built second wiped the other.
+dist-migrate

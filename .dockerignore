@@ -1,0 +1,46 @@
+# Both images install from the lockfile in their build stage, so shipping the
+# host's node_modules into context would cost minutes of upload and risk
+# platform-mismatched native binaries (bcrypt, pg) overwriting the ones npm ci
+# builds for alpine.
+node_modules
+**/node_modules
+
+# Build artifacts. The image builds its own; copying the host's in would make
+# the result depend on whatever was last built locally.
+dist
+**/dist
+**/dist-migrate
+**/out-tsc
+.nx
+.angular
+
+# Secrets. .env holds a generated JWT_ACCESS_SECRET and must never reach an
+# image layer — layers are readable by anyone who can pull the image, and
+# deleting a file in a later layer does not remove it from the earlier one.
+.env
+.env.*
+!.env.example
+
+# Test output and local scratch.
+coverage
+test-output
+playwright-report
+blob-report
+**/test-results
+.superpowers
+
+# Repository and editor state.
+.git
+.gitignore
+.github
+.claude
+.vscode
+.idea
+**/*.log
+
+# Docs and compose files change nothing about either build.
+docs
+README.md
+docker-compose.yml
+**/Dockerfile
+.dockerignore
