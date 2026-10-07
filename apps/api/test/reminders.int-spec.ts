@@ -88,6 +88,22 @@ const kindsFor = async (userId: string): Promise<string[]> => {
   return rows.map((r: { kind: string }) => r.kind);
 };
 
+// Unlike kindsFor, which only reports the sorted set of kinds a user
+// holds, this pins each kind to the bill it was recorded for — the thing
+// that actually matters: a reminder naming the wrong horizon for a bill
+// is worse than no reminder at all (spec §4.5).
+const kindsByBill = async (userId: string): Promise<Record<string, string>> => {
+  const rows = await ds.query(
+    `SELECT b."name" AS name, n."kind" AS kind
+     FROM "notifications" n
+     INNER JOIN "bill_instances" bi ON bi."id" = n."bill_instance_id"
+     INNER JOIN "bills" b ON b."id" = bi."bill_id"
+     WHERE n."user_id" = $1`,
+    [userId],
+  );
+  return Object.fromEntries(rows.map((r: { name: string; kind: string }) => [r.name, r.kind]));
+};
+
 describe('RemindersService.scan', () => {
   it('records a reminder three days out and one day out', async () => {
     const userId = await seedUser();
@@ -98,7 +114,7 @@ describe('RemindersService.scan', () => {
     const created = await reminders.scan();
 
     expect(created).toHaveLength(2);
-    expect(await kindsFor(userId)).toEqual(['DUE_IN_3_DAYS', 'DUE_TOMORROW']);
+    expect(await kindsByBill(userId)).toEqual({ Rent: 'DUE_IN_3_DAYS', Electric: 'DUE_TOMORROW' });
   });
 
   it('ignores every other horizon', async () => {
