@@ -9,6 +9,7 @@ import { CategoriesModule } from '../categories/categories.module';
 import { HealthModule } from '../health/health.module';
 import { BillsModule } from '../bills/bills.module';
 import { SummaryModule } from '../summary/summary.module';
+import { NotificationsModule } from '../notifications/notifications.module';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 
 @Module({
@@ -22,6 +23,7 @@ import { JwtAuthGuard } from '../auth/jwt-auth.guard';
     HealthModule,
     BillsModule,
     SummaryModule,
+    NotificationsModule,
   ],
   providers: [{ provide: APP_GUARD, useClass: JwtAuthGuard }],
 })

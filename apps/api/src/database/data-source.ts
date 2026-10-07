@@ -7,6 +7,7 @@ import { Category } from '../categories/category.entity';
 import { Bill } from '../bills/bill.entity';
 import { BillInstance } from '../bills/bill-instance.entity';
 import { PaymentLog } from '../bills/payment-log.entity';
+import { Notification } from '../notifications/notification.entity';
 import { InitialSchema1759536000000 } from './migrations/1759536000000-InitialSchema';
 import { AddBillTables1759622400000 } from './migrations/1759622400000-AddBillTables';
 import {
@@ -34,7 +35,7 @@ export const AppDataSource = new DataSource({
   ssl: process.env.DB_SSL === 'true' ? { rejectUnauthorized: true } : false,
   synchronize: false,
   logging: false,
-  entities: [User, RefreshToken, Category, Bill, BillInstance, PaymentLog],
+  entities: [User, RefreshToken, Category, Bill, BillInstance, PaymentLog, Notification],
   migrations: [
     InitialSchema1759536000000, AddBillTables1759622400000, AddPaymentLogsSignCheck1759708800000,
     AddNotifications1759795200000,
