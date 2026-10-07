@@ -51,6 +51,13 @@ function hrefs(fixture: { nativeElement: HTMLElement }): string[] {
   return [...fixture.nativeElement.querySelectorAll('a')].map((a) => a.getAttribute('href') ?? '');
 }
 
+/** Scopes an assertion to one card, found by its title, rather than the whole document. */
+function cardText(fixture: { nativeElement: HTMLElement }, title: string): string {
+  const titles = [...fixture.nativeElement.querySelectorAll('mat-card-title')];
+  const match = titles.find((el) => el.textContent?.trim() === title);
+  return match?.closest('mat-card')?.textContent ?? '';
+}
+
 beforeEach(() => {
   TestBed.configureTestingModule({
     imports: [DashboardComponent],
@@ -76,9 +83,9 @@ afterEach(() => {
 describe('DashboardComponent figures', () => {
   it('shows the overdue count and total', async () => {
     const fixture = await render();
-    const text = fixture.nativeElement.textContent;
+    const text = cardText(fixture, 'Overdue');
     expect(text).toContain('$450.00');
-    expect(text).toContain('2');
+    expect(text).toContain('2 bill(s) past due');
   });
 
   it('shows this month’s total and how much of it is paid', async () => {
@@ -108,9 +115,18 @@ describe('DashboardComponent figures', () => {
       byCategory: [],
     };
     const fixture = await render(empty);
-    const text: string = fixture.nativeElement.textContent;
 
-    expect(text).toContain('$0.00');
+    const overdue = cardText(fixture, 'Overdue');
+    const month = cardText(fixture, 'Due this month');
+    const next7 = cardText(fixture, 'Next 7 days');
+
+    expect(overdue).toContain('$0.00');
+    // Both the total and the paid-so-far figure render here; a single
+    // `toContain` would pass even if one of the two were blank or NaN.
+    expect((month.match(/\$0\.00/g) ?? []).length).toBe(2);
+    expect(next7).toContain('$0.00');
+
+    const text: string = fixture.nativeElement.textContent;
     expect(text).not.toContain('NaN');
     expect(text).not.toContain('null');
   });
@@ -157,9 +173,31 @@ describe('DashboardComponent links', () => {
     expect(link).toContain('to=2026-10-21');
   });
 
+  it('links the month card to the calendar month', async () => {
+    const fixture = await render();
+    // The month card's own link has neither `categoryId` (a category row)
+    // nor `overdue=true` nor the next-7-days' `from` — ruling those out
+    // leaves only this card's link, which shares its date computation
+    // with every category row.
+    const link =
+      hrefs(fixture).find(
+        (h) =>
+          h.includes('/upcoming') &&
+          !h.includes('categoryId') &&
+          !h.includes('overdue=true') &&
+          !h.includes('from=2026-10-15'),
+      ) ?? '';
+    expect(link).toContain('from=2026-10-01');
+    expect(link).toContain('to=2026-10-31');
+  });
+
   it('links a category row to that category', async () => {
     const fixture = await render();
-    expect(hrefs(fixture).some((h) => h.includes('categoryId=cat-1'))).toBe(true);
+    const link = hrefs(fixture).find((h) => h.includes('categoryId=cat-1')) ?? '';
+    expect(link).not.toBe('');
+    // Same start/end-of-month computation the month card itself uses.
+    expect(link).toContain('from=2026-10-01');
+    expect(link).toContain('to=2026-10-31');
   });
 
   it('links the uncategorized row to the no-category sentinel', async () => {
