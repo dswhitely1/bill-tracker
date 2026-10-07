@@ -3,6 +3,13 @@
   "compilerOptions": {
     "allowJs": true,
     "outDir": "out-tsc/playwright",
+    // bootstrap-db.ts imports global-setup.ts with an explicit extension
+    // because Node's ESM resolver requires it (the workspace has no
+    // "type": "module", so an import without one fails outside tsc —
+    // see bootstrap-db.ts for the full explanation). This option is the
+    // compiler's side of recognizing that import; it requires `noEmit` or
+    // `emitDeclarationOnly`, both already set for this project.
+    "allowImportingTsExtensions": true,
     "sourceMap": false,
     "strict": true,
     "noImplicitOverride": true,
@@ -13,7 +20,7 @@
   "include": [
     "**/*.ts",
     "**/*.js",
-    "playwright.config.mts",
+    "playwright.config.ts",
     "src/**/*.spec.ts",
     "src/**/*.spec.js",
     "src/**/*.test.ts",
