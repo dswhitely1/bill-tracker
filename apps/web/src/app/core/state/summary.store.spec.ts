@@ -1,6 +1,6 @@
 import { provideHttpClient } from '@angular/common/http';
 import { HttpTestingController, provideHttpClientTesting } from '@angular/common/http/testing';
-import { provideZonelessChangeDetection } from '@angular/core';
+import { ApplicationRef, provideZonelessChangeDetection } from '@angular/core';
 import { TestBed } from '@angular/core/testing';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { SummaryResponse } from '@bill-tracker/shared-types';
@@ -183,5 +183,56 @@ describe('SummaryStore', () => {
 
     expect(store.summary()).toBeNull();
     expect(store.loaded()).toBe(false);
+  });
+
+  // Task 9. An Angular effect runs its body once on its first flush
+  // regardless of what it read, so a test whose first flush happens to
+  // land after `load()` has already resolved would observe a fetch that
+  // had nothing to do with the counter it meant to exercise. These two
+  // tests force the first flush to settle BEFORE the mutation they care
+  // about, so a passing result cannot be explained by that bug.
+  it('refetches when a bill mutation is recorded', async () => {
+    const store = TestBed.inject(SummaryStore);
+    const bills = TestBed.inject(BillsStore);
+
+    const loading = store.load();
+    summaryRequest().flush(payload);
+    await loading;
+
+    // The mandatory first flush of the mutation-watching effect fires
+    // unconditionally here, because `loadedState` has already gone true
+    // by the time it lands — drain it as a known artifact so it cannot be
+    // confused with the mutation-triggered fetch asserted below.
+    await TestBed.inject(ApplicationRef).whenStable();
+    http.match((r) => r.url === '/api/summary').forEach((r) => r.flush(payload));
+    await TestBed.inject(ApplicationRef).whenStable();
+    http.expectNone((r) => r.url === '/api/summary');
+
+    bills.announceMutation();
+    await TestBed.inject(ApplicationRef).whenStable();
+
+    // At least one literal expect(): apps/web/.oxlintrc.json does not
+    // treat http.expectOne as an assertion.
+    const pending = http.match((r) => r.url === '/api/summary');
+    expect(pending).toHaveLength(1);
+    pending[0].flush(payload);
+  });
+
+  it('does not refetch when no counter has moved', async () => {
+    const store = TestBed.inject(SummaryStore);
+
+    const loading = store.load();
+    summaryRequest().flush(payload);
+    await loading;
+
+    // Drain the mandatory first flush (see the test above) before
+    // checking that a second, dependency-free flush stays silent.
+    await TestBed.inject(ApplicationRef).whenStable();
+    http.match((r) => r.url === '/api/summary').forEach((r) => r.flush(payload));
+    await TestBed.inject(ApplicationRef).whenStable();
+
+    // The guard against the first-flush bug: a flush with nothing changed
+    // must be silent.
+    expect(http.match((r) => r.url === '/api/summary')).toHaveLength(0);
   });
 });

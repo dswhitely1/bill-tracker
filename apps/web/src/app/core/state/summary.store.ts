@@ -24,6 +24,18 @@ export class SummaryStore {
   readonly error = this.errorState.asReadonly();
   readonly loaded = this.loadedState.asReadonly();
 
+  /**
+   * Last-seen counter values. The effect compares against these instead of
+   * relying on an effect's first flush running its body regardless of its
+   * dependencies — which is what made the old refetch tests tautological:
+   * when the first flush landed after `load()` resolved, the body ran with
+   * `loadedState` already true and fetched for no reason at all.
+   *
+   * Initialized from the current values so the first flush is a no-op.
+   */
+  private lastBillsMutations = this.bills.mutations();
+  private lastPaymentsMutations = this.payments.mutations();
+
   constructor() {
     effect(() => {
       if (!this.session.isAuthenticated()) this.reset();
@@ -32,14 +44,17 @@ export class SummaryStore {
     // Both counters, because both move these figures: a payment changes
     // every bucket, and creating, editing, or deleting a bill rewrites the
     // instances the buckets are computed from.
-    //
-    // `loadedState` is read untracked on purpose. Tracked, the first
-    // successful fetch — which sets it true — would re-run this effect and
-    // immediately fetch again. The counters are the only triggers.
     effect(() => {
-      this.bills.mutations();
-      this.payments.mutations();
-      if (untracked(() => this.loadedState())) void this.fetch();
+      const bills = this.bills.mutations();
+      const payments = this.payments.mutations();
+      const moved =
+        bills !== this.lastBillsMutations || payments !== this.lastPaymentsMutations;
+      this.lastBillsMutations = bills;
+      this.lastPaymentsMutations = payments;
+
+      // `loadedState` is read untracked on purpose: tracked, the first
+      // successful fetch would re-run this effect and fetch again.
+      if (moved && untracked(() => this.loadedState())) void this.fetch();
     });
   }
 
