@@ -33,6 +33,15 @@ export class PaymentsService {
    */
   readonly mutations = this.changeCount.asReadonly();
 
+  /**
+   * Bumps the counter without a mutation behind it. The stores that watch
+   * this counter are the unit under test in their own specs; staging a
+   * real payment there would test this service instead of them.
+   */
+  announceMutation(): void {
+    this.changeCount.update((n) => n + 1);
+  }
+
   /** An omitted `amount` means the remaining balance, computed server-side under a row lock. */
   async record(id: string, body: RecordPaymentRequest = {}): Promise<PaymentResultResponse> {
     const result = await firstValueFrom(this.api.recordPayment(id, body));
