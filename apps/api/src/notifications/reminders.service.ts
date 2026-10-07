@@ -179,7 +179,17 @@ export class RemindersService {
       }
     }
 
-    const result = { created: created.length, usersNotified: byUser.size, mailSent, mailFailed };
+    const result = {
+      created: created.length,
+      // From scan()'s own output, not byUser.size: DIGEST_SQL filters on
+      // notify_email, so a user who only has notify_in_app on would never
+      // enter byUser even though scan() wrote their row and their bell
+      // lit up. usersNotified must count every user notified by any
+      // channel, not just the ones who got mail.
+      usersNotified: new Set(created.map((c) => c.userId)).size,
+      mailSent,
+      mailFailed,
+    };
     this.logger.log(
       `Reminder run created ${result.created} notification(s); ` +
         `mail sent ${mailSent}, failed ${mailFailed}`,

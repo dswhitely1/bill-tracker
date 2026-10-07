@@ -300,7 +300,7 @@ describe('RemindersService.run', () => {
 
     expect(await kindsFor(userId)).toEqual(['DUE_TOMORROW']);
     expect(sent).toHaveLength(0);
-    expect(result.mailSent).toBe(0);
+    expect(result).toEqual({ created: 1, usersNotified: 1, mailSent: 0, mailFailed: 0 });
   });
 
   it('sends mail to a user who has only the email channel on', async () => {
