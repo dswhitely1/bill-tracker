@@ -24,8 +24,8 @@ export class NotificationsStore {
   private readonly loadedState = signal(false);
 
   /**
-   * Monotonic request generation. Bumped in two situations, both of which
-   * make an in-flight `fetch()` response stale:
+   * Monotonic request generation. Bumped in three situations, all of
+   * which make an in-flight `fetch()` response stale:
    *
    * - Two fetches overlap and resolve out of order — e.g. two
    *   `visibilitychange` refreshes close together — so whichever started
@@ -36,6 +36,10 @@ export class NotificationsStore {
    *   the row the mutation just changed — reading as the app losing the
    *   click. Bumping here, not in `fetch()`, is what lets this one counter
    *   catch both: a read racing a newer read, and a read racing a write.
+   * - `reset()` runs (the session ended). A fetch in flight at that moment
+   *   was reading the *previous* user's notifications; without the bump
+   *   its checkpoint in `fetch()` would still match and it would write
+   *   that user's rows into the store the next user's `load()` reads from.
    *
    * Same shape as `InstancesStore.fetchGeneration`, guarding against the
    * same kind of late arrival.
@@ -43,15 +47,24 @@ export class NotificationsStore {
   private fetchGeneration = 0;
 
   /**
-   * Count of `fetch()` calls currently awaiting a response. `loading`
-   * answers a different question than `fetchGeneration`: whether *any*
-   * fetch is outstanding, not whether a *given* fetch's data is still
-   * wanted. The two cannot share one mechanism — a `markRead`/
-   * `markAllRead` bump can invalidate an in-flight fetch's data without
-   * starting a fetch of its own, so there would be nothing left to clear
-   * `loading` if it were gated on the generation matching at resolution.
+   * The generation id of every `fetch()` call currently awaiting a
+   * response. `loading` answers a different question than
+   * `fetchGeneration`: whether *any* fetch is outstanding, not whether a
+   * *given* fetch's data is still wanted. The two cannot share one
+   * mechanism — a `markRead`/`markAllRead` bump, or `reset()`, can
+   * invalidate an in-flight fetch's data without starting (or finishing)
+   * a fetch of its own, so there would be nothing left to clear `loading`
+   * if it were gated on the generation matching at resolution.
+   *
+   * A set rather than a count: `delete()` on an id that was never added,
+   * or was already removed by `reset()`'s `clear()`, is a no-op by
+   * construction. A plain counter cannot offer that — a decrement always
+   * affects the count, so an orphaned fetch settling after `reset()` (and
+   * after a brand-new fetch has already incremented) would cancel that
+   * new fetch's slot and clear `loading` while it is still running, no
+   * matter how the counter was clamped.
    */
-  private inFlight = 0;
+  private readonly outstanding = new Set<number>();
 
   readonly items = this.data.asReadonly();
   readonly unreadCount = this.unread.asReadonly();
@@ -152,20 +165,22 @@ export class NotificationsStore {
     this.loadedState.set(false);
     this.errorState.set(null);
     this.loadingState.set(false);
-    // Without this, a fetch already in flight when the session ends would
-    // still decrement `inFlight` when it eventually settles — against a
-    // baseline that never accounted for the reset — and if a second fetch
-    // was also outstanding at that moment, the first one landing would
-    // compute `inFlight > 0` as true and flip `loadingState` back on right
-    // after this line turned it off. Zeroing it here means every post-reset
-    // fetch's own increment/decrement nets out correctly regardless of
-    // what either counter's absolute value happens to be afterward.
-    this.inFlight = 0;
+    // Invalidates any fetch already in flight for the user whose session
+    // just ended: without this, that fetch's checkpoint in `fetch()` would
+    // still match on resolution, writing the previous user's notifications
+    // into the data the next user's `load()` reads from — `loadedState`
+    // would already be true, so that `load()` would never even fetch to
+    // correct it.
+    this.fetchGeneration++;
+    // `clear()`, not zeroing a count: an orphaned fetch settling later only
+    // has its own id `delete()`d, which is a no-op once that id is gone —
+    // it can never cancel a fetch that starts after this point.
+    this.outstanding.clear();
   }
 
   private async fetch(): Promise<void> {
     const generation = ++this.fetchGeneration;
-    this.inFlight++;
+    this.outstanding.add(generation);
     this.loadingState.set(true);
     this.errorState.set(null);
     try {
@@ -183,15 +198,16 @@ export class NotificationsStore {
       if (this.fetchGeneration !== generation) return;
       this.errorState.set(errorMessage(error));
     } finally {
-      // `loading` tracks whether any fetch is outstanding — a count, not
-      // a generation. Decrementing unconditionally (unlike the data writes
-      // above) is what makes that correct: this fetch's data may have just
-      // been skipped because a newer fetch, or a mark-read/mark-all-read
-      // that started no fetch at all, invalidated it, but this fetch is
-      // still finishing and must still give up its slot. Only once nothing
-      // is left outstanding does `loading` clear.
-      this.inFlight--;
-      this.loadingState.set(this.inFlight > 0);
+      // `loading` tracks whether any fetch is outstanding — set membership,
+      // not a generation. Removing this id unconditionally (unlike the
+      // data writes above) is what makes that correct: this fetch's data
+      // may have just been skipped because a newer fetch, a mark-read/
+      // mark-all-read that started no fetch at all, or a `reset()`
+      // invalidated it, but this fetch is still finishing and must still
+      // give up its own slot. Only once nothing is left outstanding does
+      // `loading` clear.
+      this.outstanding.delete(generation);
+      this.loadingState.set(this.outstanding.size > 0);
     }
   }
 }

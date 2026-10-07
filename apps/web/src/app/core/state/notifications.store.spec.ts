@@ -304,6 +304,79 @@ describe('NotificationsStore session reset', () => {
     expect(store.items()).toHaveLength(0);
     expect(store.unreadCount()).toBe(0);
   });
+
+  it('does not let a fetch orphaned by logout write the next session\'s store', async () => {
+    const loading = store.load();
+    http.expectOne('/api/notifications').flush(
+      response({ items: [item({ id: 'n1' }), item({ id: 'n2' })], unreadCount: 2 }),
+    );
+    await loading;
+
+    // A refresh goes out, then the session ends while it is still in
+    // flight — the orphaned request belongs to the user who just logged
+    // out.
+    const refreshing = store.refresh();
+    const orphan = http.expectOne('/api/notifications');
+
+    authenticated.set(false);
+    await stable();
+
+    // The orphan's response, computed for the previous user, lands only
+    // now. Without reset() bumping fetchGeneration, this would still pass
+    // fetch()'s checkpoint and write that user's rows into the store.
+    orphan.flush(
+      response({ items: [item({ id: 'n1' }), item({ id: 'n2' })], unreadCount: 2 }),
+    );
+    await refreshing;
+
+    expect(store.items()).toHaveLength(0);
+    expect(store.unreadCount()).toBe(0);
+    expect(store.loading()).toBe(false);
+
+    // The part that makes the leak user-visible: if the orphan had also
+    // set loadedState back to true, the next sign-in's load() would
+    // silently no-op instead of fetching that user's own notifications.
+    const reloading = store.load();
+    const requests = http.match('/api/notifications');
+    expect(requests).toHaveLength(1);
+    requests[0].flush(response({ items: [item({ id: 'm1' })], unreadCount: 1 }));
+    await reloading;
+  });
+
+  it('does not let an orphan settling after a fresh fetch started clear its loading', async () => {
+    const loading = store.load();
+    http.expectOne('/api/notifications').flush(response());
+    await loading;
+
+    // A refresh is outstanding when the session ends.
+    const refreshing = store.refresh();
+    const orphan = http.expectOne('/api/notifications');
+
+    authenticated.set(false);
+    await stable();
+
+    // A new session starts and issues its own fetch before the orphan
+    // lands.
+    authenticated.set(true);
+    const reloading = store.load();
+    const freshRequest = http.expectOne('/api/notifications');
+
+    // The orphan from the previous session finally resolves. Its own data
+    // write is skipped (fetchGeneration has moved on), and removing its id
+    // from `outstanding` is a no-op — that id was already cleared by
+    // reset() — so it cannot cancel the fresh fetch's slot. A clamped
+    // counter could not make this guarantee: by this point a decrement
+    // would land on a baseline the new fetch had already incremented.
+    orphan.flush(response());
+    await refreshing;
+
+    expect(store.loading()).toBe(true);
+
+    freshRequest.flush(response());
+    await reloading;
+
+    expect(store.loading()).toBe(false);
+  });
 });
 
 describe('NotificationsStore visibility refresh', () => {
