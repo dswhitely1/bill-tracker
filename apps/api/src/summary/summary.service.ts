@@ -10,9 +10,10 @@ import { addDays, daysInMonth, format, parse } from '../bills/dates';
  * One pass over the user's instances producing all three scalar buckets.
  *
  * `FILTER` rather than three separate statements: the table is scanned
- * once, and the `['userId', 'status', 'dueDate']` index serves the whole
- * predicate. `bill_instances.user_id` is denormalized, so no join to
- * `bills` is needed here at all.
+ * once. An index on `['userId', 'status', 'dueDate']` exists and covers
+ * every column this predicate touches, though the planner's actual choice
+ * to use it is unmeasured here. `bill_instances.user_id` is denormalized,
+ * so no join to `bills` is needed here at all.
  *
  * Every `SUM` is wrapped in `COALESCE`: Postgres returns NULL, not 0, for
  * a sum over zero rows, and an account with no bills would otherwise put

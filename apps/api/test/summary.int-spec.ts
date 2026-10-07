@@ -253,3 +253,36 @@ describe('SummaryService byCategory', () => {
     ]);
   });
 });
+
+describe('SummaryService user scoping', () => {
+  it('scopes both the scalar buckets and byCategory to the requesting user, not the whole table', async () => {
+    const categories = ds.getRepository(Category);
+
+    const userA = await seedUser();
+    const catA = await categories.save(categories.create({ userId: userA, name: 'CatA', color: '#aaaaaa' }));
+    const billA = await seedBill(userA, catA.id);
+    // Due before AS_OF (2026-10-15): lands in overdue and in thisMonth.
+    await seedInstance(userA, billA, { dueDate: '2026-10-14', amount: 100 });
+
+    const userB = await seedUser();
+    const catB = await categories.save(categories.create({ userId: userB, name: 'CatB', color: '#bbbbbb' }));
+    const billB = await seedBill(userB, catB.id);
+    // Different amount so a cross-tenant leak produces a visibly wrong
+    // number rather than a coincidentally equal one.
+    await seedInstance(userB, billB, { dueDate: '2026-10-14', amount: 500 });
+
+    const resultA = await summary.get(userA);
+    expect(resultA.overdue).toEqual({ count: 1, amount: 100, earliestDueDate: '2026-10-14' });
+    expect(resultA.thisMonth).toEqual({ count: 1, total: 100, paid: 0 });
+    expect(resultA.byCategory).toEqual([
+      { categoryId: catA.id, categoryName: 'CatA', color: '#aaaaaa', total: 100, paid: 0 },
+    ]);
+
+    const resultB = await summary.get(userB);
+    expect(resultB.overdue).toEqual({ count: 1, amount: 500, earliestDueDate: '2026-10-14' });
+    expect(resultB.thisMonth).toEqual({ count: 1, total: 500, paid: 0 });
+    expect(resultB.byCategory).toEqual([
+      { categoryId: catB.id, categoryName: 'CatB', color: '#bbbbbb', total: 500, paid: 0 },
+    ]);
+  });
+});
