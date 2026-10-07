@@ -119,10 +119,15 @@ describe('sortInstances', () => {
   });
 
   it('breaks ties stably by due date then id', () => {
+    // 'm' is deliberately placed before 'a' in the input. Array.sort's own
+    // stability would already produce ['m', 'a', 'z'] if the tiebreak's id
+    // comparison were removed — putting 'a' first here, out of input order,
+    // means the expected ['a', 'm', 'z'] is reachable only via that id
+    // comparison. Do not "tidy" this back into input order.
     const tied = [
       instance({ id: 'z', billName: 'Same', dueDate: '2026-10-02', amount: 10 }),
-      instance({ id: 'a', billName: 'Same', dueDate: '2026-10-01', amount: 10 }),
       instance({ id: 'm', billName: 'Same', dueDate: '2026-10-01', amount: 10 }),
+      instance({ id: 'a', billName: 'Same', dueDate: '2026-10-01', amount: 10 }),
     ];
     expect(sortInstances(tied, 'name', 'asc').map((r) => r.id)).toEqual(['a', 'm', 'z']);
   });
