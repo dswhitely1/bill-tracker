@@ -2,6 +2,7 @@ import { Module } from '@nestjs/common';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { BillInstance } from '../bills/bill-instance.entity';
 import { BillsModule } from '../bills/bills.module';
+import { SummaryController } from './summary.controller';
 import { SummaryService } from './summary.service';
 
 /**
@@ -11,6 +12,7 @@ import { SummaryService } from './summary.service';
  */
 @Module({
   imports: [TypeOrmModule.forFeature([BillInstance]), BillsModule],
+  controllers: [SummaryController],
   providers: [SummaryService],
   exports: [SummaryService],
 })
