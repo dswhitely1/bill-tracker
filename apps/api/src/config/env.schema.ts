@@ -1,6 +1,6 @@
 import { z } from 'zod';
 
-export const envSchema = z.object({
+const baseEnvSchema = z.object({
   NODE_ENV: z.enum(['development', 'test', 'production']).default('development'),
   PORT: z.coerce.number().int().positive().default(3000),
   DATABASE_URL: z.url(),
@@ -27,6 +27,26 @@ export const envSchema = z.object({
       },
       { message: 'must be a valid IANA timezone name, for example America/New_York' },
     ),
+  /**
+   * Absent selects the logging transport (spec §5.2) — absence is a mode,
+   * not a missing default. This URL can carry a password, so like every
+   * other secret in this schema it gets no fallback value.
+   */
+  SMTP_URL: z.url().optional(),
+  MAIL_FROM: z.email().optional(),
+});
+
+export const envSchema = baseEnvSchema.superRefine((env, ctx) => {
+  // Conditional rather than unconditionally required: an installation with
+  // no mail server configured must still boot, and it must not be made to
+  // invent a sender address it will never use.
+  if (env.SMTP_URL !== undefined && env.MAIL_FROM === undefined) {
+    ctx.addIssue({
+      code: 'custom',
+      path: ['MAIL_FROM'],
+      message: 'is required when SMTP_URL is set, to name the sender of outgoing mail',
+    });
+  }
 });
 
 export type Env = z.infer<typeof envSchema>;

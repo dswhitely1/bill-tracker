@@ -67,3 +67,53 @@ describe('APP_TIMEZONE', () => {
     );
   });
 });
+
+describe('mail configuration', () => {
+  it('needs no mail configuration at all', () => {
+    const env = validateEnv({ ...valid });
+    expect(env.SMTP_URL).toBeUndefined();
+    expect(env.MAIL_FROM).toBeUndefined();
+  });
+
+  it('accepts a transport URL together with a sender', () => {
+    const env = validateEnv({
+      ...valid,
+      SMTP_URL: 'smtps://user:pass@smtp.example.com:465',
+      MAIL_FROM: 'bills@example.com',
+    });
+    expect(env.SMTP_URL).toBe('smtps://user:pass@smtp.example.com:465');
+    expect(env.MAIL_FROM).toBe('bills@example.com');
+  });
+
+  it('refuses a transport URL with no sender, and says which variable is missing', () => {
+    expect(() =>
+      validateEnv({ ...valid, SMTP_URL: 'smtps://user:pass@smtp.example.com:465' }),
+    ).toThrow(/MAIL_FROM/);
+  });
+
+  it('refuses a malformed transport URL', () => {
+    expect(() =>
+      validateEnv({ ...valid, SMTP_URL: 'not-a-url', MAIL_FROM: 'bills@example.com' }),
+    ).toThrow(/SMTP_URL/);
+  });
+
+  it('refuses a sender that is not an email address', () => {
+    expect(() =>
+      validateEnv({
+        ...valid,
+        SMTP_URL: 'smtps://user:pass@smtp.example.com:465',
+        MAIL_FROM: 'not-an-email',
+      }),
+    ).toThrow(/MAIL_FROM/);
+  });
+
+  it('provides no default for the transport URL, which can carry a password', () => {
+    let message = '';
+    try {
+      validateEnv({ ...valid, SMTP_URL: 'not-a-url', MAIL_FROM: 'bills@example.com' });
+    } catch (e) {
+      message = (e as Error).message;
+    }
+    expect(message).not.toMatch(/smtp:\/\/localhost|changeme|default/i);
+  });
+});
