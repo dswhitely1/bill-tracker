@@ -6,6 +6,7 @@ import { provideRouter } from '@angular/router';
 import { MATERIAL_ANIMATIONS } from '@angular/material/core';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { SessionService } from '../core/auth/session.service';
+import { PaymentsService } from '../core/state/payments.service';
 import { PaymentHistoryComponent } from './payment-history.component';
 
 let http: HttpTestingController;
@@ -153,5 +154,50 @@ describe('PaymentHistoryComponent', () => {
 
     expect(fixture.componentInstance.error()).toContain('already been reversed');
     expect(fixture.nativeElement.textContent).toContain('already been reversed');
+  });
+
+  it('re-fetches an open history after a payment is recorded elsewhere', async () => {
+    // The payment dialog and this history component are siblings under
+    // the same expanded row. Recording a payment there patches only the
+    // instance row (bills spec §7.3) — nothing refetches this log unless
+    // something tells it to. `PaymentsService.mutations` is that signal;
+    // dropping `this.payments.mutations()` from the component's effect
+    // makes this test fail because the second GET below never happens.
+    const fixture = render();
+    await fixture.whenStable();
+    http.expectOne('/api/bill-instances/inst-1/payments').flush([]);
+    await fixture.whenStable();
+    await fixture.whenStable();
+    expect(fixture.nativeElement.textContent).toContain('No payments recorded');
+
+    const payments = TestBed.inject(PaymentsService);
+    const done = payments.record('inst-1');
+    http.expectOne('/api/bill-instances/inst-1/payments').flush({
+      instance: {
+        id: 'inst-1',
+        billId: 'bill-1',
+        billName: 'Rent',
+        categoryId: null,
+        dueDate: '2026-10-01',
+        amount: 1200,
+        amountPaid: 1200,
+        status: 'PAID',
+        isOverdue: false,
+        isCustomized: false,
+        paidAt: '2026-10-01T12:00:00.000Z',
+        note: null,
+      },
+      payment: paid,
+    });
+    await done;
+    await fixture.whenStable();
+    await fixture.whenStable();
+
+    http.expectOne('/api/bill-instances/inst-1/payments').flush([paid]);
+    await fixture.whenStable();
+    await fixture.whenStable();
+
+    expect(fixture.nativeElement.textContent).toContain('$1,200.00');
+    expect(fixture.nativeElement.querySelectorAll('[data-testid="payment-entry"]')).toHaveLength(1);
   });
 });

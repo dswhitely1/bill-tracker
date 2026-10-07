@@ -1,4 +1,4 @@
-import { Injectable, inject } from '@angular/core';
+import { Injectable, inject, signal } from '@angular/core';
 import { firstValueFrom } from 'rxjs';
 import type {
   BillInstanceResponse,
@@ -24,16 +24,27 @@ export class PaymentsService {
   private readonly api = inject(BillInstancesApi);
   private readonly instances = inject(InstancesStore);
 
+  private readonly changeCount = signal(0);
+
+  /**
+   * Increments after every successful payment mutation. An open payment
+   * history watches this: recording, reversing or clearing a payment
+   * changes the log it is displaying, and nothing else would tell it.
+   */
+  readonly mutations = this.changeCount.asReadonly();
+
   /** An omitted `amount` means the remaining balance, computed server-side under a row lock. */
   async record(id: string, body: RecordPaymentRequest = {}): Promise<PaymentResultResponse> {
     const result = await firstValueFrom(this.api.recordPayment(id, body));
     this.instances.patch(result.instance);
+    this.changeCount.update((count) => count + 1);
     return result;
   }
 
   async reverse(id: string, paymentId: string): Promise<PaymentResultResponse> {
     const result = await firstValueFrom(this.api.reversePayment(id, paymentId));
     this.instances.patch(result.instance);
+    this.changeCount.update((count) => count + 1);
     return result;
   }
 
@@ -41,6 +52,7 @@ export class PaymentsService {
   async unpay(id: string): Promise<BillInstanceResponse> {
     const instance = await firstValueFrom(this.api.unpay(id));
     this.instances.patch(instance);
+    this.changeCount.update((count) => count + 1);
     return instance;
   }
 

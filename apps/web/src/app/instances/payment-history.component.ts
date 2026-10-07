@@ -76,6 +76,7 @@ export class PaymentHistoryComponent {
 
   constructor() {
     effect(() => {
+      this.payments.mutations();
       const id = this.instanceId();
       void this.load(id);
     });
@@ -99,8 +100,10 @@ export class PaymentHistoryComponent {
   async reverse(entry: PaymentLogResponse): Promise<void> {
     this.error.set(null);
     try {
+      // No explicit reload here: a successful reverse bumps
+      // `payments.mutations()`, and the constructor's effect re-fetches in
+      // response. Reloading here too would double-fetch.
       await this.payments.reverse(this.instanceId(), entry.id);
-      await this.load(this.instanceId());
     } catch (error: unknown) {
       this.error.set(errorMessage(error));
       // A conflict means the local view and the server disagree. Showing
