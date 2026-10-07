@@ -347,19 +347,19 @@ describe('invalidation by template changes', () => {
     pending[0].flush([instance]);
   });
 
-  it('does not refetch when no counter has moved', async () => {
+  it('does not fetch again when the effect first flushes after a load', async () => {
     const done = store.setQuery({ from: '2026-10-01', to: '2026-10-31' });
     instanceRequest().flush([instance]);
     await done;
 
-    // Drain the mandatory first flush (see the test above) before
-    // checking that a second, dependency-free flush stays silent.
-    await TestBed.inject(ApplicationRef).whenStable();
-    http.match((r) => r.url === '/api/bill-instances').forEach((r) => r.flush([instance]));
+    // The effect's mandatory first flush lands here. Nothing has mutated,
+    // so nothing should be requested. No drain before this line on
+    // purpose: a drain would absorb exactly the spurious fetch this test
+    // exists to catch. `http.match` both returns and removes any matching
+    // request, so this assertion leaves nothing behind for `http.verify()`
+    // to object to in either outcome.
     await TestBed.inject(ApplicationRef).whenStable();
 
-    // The guard against the first-flush bug: a flush with nothing changed
-    // must be silent.
     expect(http.match((r) => r.url === '/api/bill-instances')).toHaveLength(0);
   });
 });

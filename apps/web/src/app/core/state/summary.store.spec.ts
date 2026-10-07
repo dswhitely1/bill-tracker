@@ -218,21 +218,21 @@ describe('SummaryStore', () => {
     pending[0].flush(payload);
   });
 
-  it('does not refetch when no counter has moved', async () => {
+  it('does not fetch again when the effect first flushes after a load', async () => {
     const store = TestBed.inject(SummaryStore);
 
     const loading = store.load();
     summaryRequest().flush(payload);
     await loading;
 
-    // Drain the mandatory first flush (see the test above) before
-    // checking that a second, dependency-free flush stays silent.
-    await TestBed.inject(ApplicationRef).whenStable();
-    http.match((r) => r.url === '/api/summary').forEach((r) => r.flush(payload));
+    // The effect's mandatory first flush lands here. Nothing has mutated,
+    // so nothing should be requested. No drain before this line on
+    // purpose: a drain would absorb exactly the spurious fetch this test
+    // exists to catch. `http.match` both returns and removes any matching
+    // request, so this assertion leaves nothing behind for `http.verify()`
+    // to object to in either outcome.
     await TestBed.inject(ApplicationRef).whenStable();
 
-    // The guard against the first-flush bug: a flush with nothing changed
-    // must be silent.
     expect(http.match((r) => r.url === '/api/summary')).toHaveLength(0);
   });
 });
